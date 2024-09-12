@@ -14,8 +14,9 @@ module Prov = {
   type t =
     | Surface(Id.t) // Type hole in the surface syntax
     | Syn(Id.t) // Type hole synthesized from empty hole or mark in the surface syntax
-    | ArrowL(t)
-    | ArrowR(t);
+    | Arg(Id.t) // Hole analyzed onto application argument if no function type available. Unique fresh ID.
+    | LArrow(t)
+    | RArrow(t);
 };
 
 module Htyp = {
@@ -114,6 +115,13 @@ type constramnot = unit; //(Htyp.t, Htyp.t);
 
 exception Unimplemented;
 
+let next_id: ref(int) = {contents: 0};
+
+let fresh_id = (_: unit): Id.t => {
+  next_id.contents = next_id.contents + 1;
+  next_id.contents;
+};
+
 // Perform cursor erasure
 let rec erase_typ = (t: Ztyp.t): Htyp.t => {
   switch (t) {
@@ -142,7 +150,7 @@ let matched_arrow_typ =
     (t: Htyp.t): option((Htyp.t, Htyp.t, list(constramnot))) => {
   switch (t) {
   | Arrow(t1, t2) => Some((t1, t2, []))
-  | Hole => Some((Hole, Hole, [()])) // TODO
+  | Hole(u) => Some((Hole(LArrow(u)), Hole(RArrow(u)), [()])) // [(Hole(u), Arrow(Hole(LArrow(u)), Hole(RArrow(u))))])) // TODO
   | _ => None
   };
 };
@@ -162,8 +170,8 @@ let matched_arrow_typ =
 
 let rec type_consistent = (t1: Htyp.t, t2: Htyp.t): bool => {
   switch (t1, t2) {
-  | (Hole, _) => true
-  | (_, Hole) => true
+  | (Hole(_), _) => true
+  | (_, Hole(_)) => true
   | (Num, Num) => true
   | (Arrow(t11, t12), Arrow(t21, t22)) =>
     type_consistent(t11, t21) && type_consistent(t12, t22)
@@ -177,11 +185,13 @@ let rec mark_syn =
   switch (e) {
   | Var(x) =>
     switch (TypCtx.find_opt(x, ctx)) {
-    | None => (Mark(e, Free), Hole, [])
+    | None =>
+      let u = fresh_id();
+      (Mark(e, u, Free), Hole(Syn(u)), []);
     | Some(t) => (e, t, [])
     }
   | NumLit(_) => (e, Num, [])
-  | EHole => (e, Hole, [])
+  | EHole(u) => (e, Hole(Syn(u)), [])
   | Lam(x, t, e) =>
     let (e', t', c) = mark_syn(TypCtx.add(x, t, ctx), e);
     (Lam(x, t, e'), Arrow(t, t'), c);
@@ -189,11 +199,14 @@ let rec mark_syn =
     let (e1', t1, c1) = mark_syn(ctx, e1);
     switch (matched_arrow_typ(t1)) {
     | None =>
-      let (e2', c2) = mark_ana(ctx, Hole, e2);
-      (Ap(Mark(e1', NonArrowAp), e2'), Hole, c2);
-    | Some((t11, t12, c12)) =>
-      let (e2', c2) = mark_ana(ctx, t11, e2);
-      (Ap(e1', e2'), t12, c1 @ c12 @ c2);
+      let u = fresh_id();
+      let (markt1, markt2, c2) =
+        Option.get(matched_arrow_typ(Hole(Syn(u))));
+      let (e2', c3) = mark_ana(ctx, markt1, e2);
+      (Ap(Mark(e1', u, NonArrowAp), e2'), markt2, c2 @ c3);
+    | Some((t11, t12, c2)) =>
+      let (e2', c3) = mark_ana(ctx, t11, e2);
+      (Ap(e1', e2'), t12, c1 @ c2 @ c3);
     };
   | Plus(e1, e2) =>
     let (e1', c1) = mark_ana(ctx, Num, e1);
@@ -219,7 +232,7 @@ and mark_ana =
     } else {
       (
         // NOTE: in the paper, there's a constraint generated here. I don't think we need it.
-        Mark(e', Inconsistent),
+        Mark(e', fresh_id(), Inconsistent),
         [],
       );
     };
@@ -236,7 +249,7 @@ and mark_ana =
           c1 @ c2 @ [()] // TODO
         );
       } else {
-        (Mark(Lam(x, t', body'), LamAscIncon), c1 @ c2);
+        (Mark(Lam(x, t', body'), fresh_id(), LamAscIncon), c1 @ c2);
       };
     }
   | _ => subsume(e)
@@ -343,7 +356,7 @@ let rec move_action = (e: Zexp.t, a: Dir.t): Zexp.t => {
     | (Ap(e1, e2), Child(Two)) => RAp(e1, Cursor(e2))
     | (Plus(e1, e2), Child(One)) => LPlus(Cursor(e1), e2)
     | (Plus(e1, e2), Child(Two)) => RPlus(e1, Cursor(e2))
-    | (Mark(e, m), Child(One)) => Mark(Cursor(e), m)
+    | (Mark(e, u, m), Child(One)) => Mark(Cursor(e), u, m)
     | _ => raise(Unimplemented)
     }
   | LLam(name, asc, body) =>
@@ -386,10 +399,10 @@ let rec move_action = (e: Zexp.t, a: Dir.t): Zexp.t => {
     | (Parent, Cursor(t)) => Cursor(Plus(et, t))
     | (_, _) => RPlus(et, move_action(zt, a))
     }
-  | Mark(ze, m) =>
+  | Mark(ze, u, m) =>
     switch (a, ze) {
-    | (Parent, Cursor(t)) => Cursor(Mark(t, m))
-    | (_, _) => Mark(move_action(ze, a), m)
+    | (Parent, Cursor(t)) => Cursor(Mark(t, u, m))
+    | (_, _) => Mark(move_action(ze, a), u, m)
     }
   };
 };
@@ -403,11 +416,12 @@ let rec typ_action = (t: Ztyp.t, a: Action.t): Ztyp.t => {
       switch (a) {
       | Construct(shape) =>
         switch (typ, shape) {
-        | (Hole, Num) => Cursor(Num)
-        | (sub_t, Arrow) => Cursor(Arrow(sub_t, Hole))
+        | (Hole(_), Num) => Cursor(Num)
+        | (sub_t, Arrow) =>
+          Cursor(Arrow(sub_t, Hole(Surface(fresh_id()))))
         | _ => t
         }
-      | Del => Cursor(Hole)
+      | Del => Cursor(Hole(Surface(fresh_id())))
       | Move(_) => t // this cant happen
       }
     | LArrow(zt, t) =>
@@ -433,23 +447,24 @@ let rec exp_action = (e: Zexp.t, a: Action.t): Zexp.t => {
       | Construct(Num) => e
       | Construct(Var(name)) =>
         switch (h_exp) {
-        | EHole => Cursor(Var(name))
+        | EHole(_) => Cursor(Var(name))
         | _ => e // cant construct a var on a non-hole
         }
       | Construct(Lam(name)) =>
         switch (h_exp) {
-        | EHole => LLam(name, Cursor(Hole), EHole)
+        | EHole(u) =>
+          LLam(name, Cursor(Hole(Surface(fresh_id()))), EHole(u))
         | _ => e
         }
-      | Construct(Asc) => RAsc(h_exp, Cursor(Hole))
-      | Construct(Ap) => RAp(h_exp, Cursor(EHole))
+      | Construct(Asc) => RAsc(h_exp, Cursor(Hole(Surface(fresh_id()))))
+      | Construct(Ap) => RAp(h_exp, Cursor(EHole(fresh_id())))
       | Construct(NumLit(n)) =>
         switch (h_exp) {
-        | EHole => Cursor(NumLit(n))
+        | EHole(_) => Cursor(NumLit(n))
         | _ => e
         }
-      | Construct(Plus) => RPlus(h_exp, Cursor(EHole))
-      | Del => Cursor(EHole)
+      | Construct(Plus) => RPlus(h_exp, Cursor(EHole(fresh_id())))
+      | Del => Cursor(EHole(fresh_id()))
       }
     // zipper cases
     | LAp(z_exp, h_exp) => LAp(exp_action(z_exp, a), h_exp)
@@ -469,7 +484,7 @@ let rec exp_action = (e: Zexp.t, a: Action.t): Zexp.t => {
 let rec fold_zexp_mexp = (z: Zexp.t, e: Hexp.t): Zexp.t => {
   switch (z, e) {
   | (Cursor(_), e) => Cursor(e)
-  | (z, Mark(e, m)) => Mark(fold_zexp_mexp(z, e), m)
+  | (z, Mark(e, u, m)) => Mark(fold_zexp_mexp(z, e), u, m)
   | (LAp(z, _), Ap(e, e2)) => LAp(fold_zexp_mexp(z, e), e2)
   | (RAp(_, z), Ap(e1, e)) => RAp(e1, fold_zexp_mexp(z, e))
   | (LAsc(z, _), Asc(e, t)) => LAsc(fold_zexp_mexp(z, e), t)
