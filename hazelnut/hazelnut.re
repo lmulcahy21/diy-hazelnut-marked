@@ -97,6 +97,8 @@ module Action = {
 module TypCtx = Map.Make(String);
 type typctx = TypCtx.t(Htyp.t);
 
+type constramnot = unit;
+
 exception Unimplemented;
 
 // Perform cursor erasure
@@ -123,10 +125,11 @@ let rec erase_exp = (e: Zexp.t): Hexp.t => {
   };
 };
 
-let matched_arrow_typ = (t: Htyp.t): option((Htyp.t, Htyp.t)) => {
+let matched_arrow_typ =
+    (t: Htyp.t): option((Htyp.t, Htyp.t, list(constramnot))) => {
   switch (t) {
-  | Arrow(t1, t2) => Some((t1, t2))
-  | Hole => Some((Hole, Hole))
+  | Arrow(t1, t2) => Some((t1, t2, []))
+  | Hole => Some((Hole, Hole, [()])) // TODO
   | _ => None
   };
 };
@@ -378,57 +381,71 @@ let rec exp_action = (e: Zexp.t, a: Action.t): Zexp.t => {
 };
 
 // Precondition: e has no marks
-let rec mark_syn = (ctx: typctx, e: Hexp.t): (Hexp.t, Htyp.t) => {
+let rec mark_syn =
+        (ctx: typctx, e: Hexp.t): (Hexp.t, Htyp.t, list(constramnot)) => {
   switch (e) {
   | Var(x) =>
     switch (TypCtx.find_opt(x, ctx)) {
-    | None => (Mark(e, Free), Hole)
-    | Some(t) => (e, t)
+    | None => (Mark(e, Free), Hole, [])
+    | Some(t) => (e, t, [])
     }
-  | NumLit(_) => (e, Num)
-  | EHole => (e, Hole)
+  | NumLit(_) => (e, Num, [])
+  | EHole => (e, Hole, [])
   | Lam(x, t, e) =>
-    let (e', t') = mark_syn(TypCtx.add(x, t, ctx), e);
-    (Lam(x, t, e'), Arrow(t, t'));
+    let (e', t', c) = mark_syn(TypCtx.add(x, t, ctx), e);
+    (Lam(x, t, e'), Arrow(t, t'), c);
   | Ap(e1, e2) =>
-    let (e1', t1) = mark_syn(ctx, e1);
+    let (e1', t1, c1) = mark_syn(ctx, e1);
     switch (matched_arrow_typ(t1)) {
     | None =>
-      let e2' = mark_ana(ctx, Hole, e2);
-      (Ap(Mark(e1', NonArrowAp), e2'), Hole);
-    | Some((t11, t12)) =>
-      let e2' = mark_ana(ctx, t11, e2);
-      (Ap(e1', e2'), t12);
+      let (e2', c2) = mark_ana(ctx, Hole, e2);
+      (Ap(Mark(e1', NonArrowAp), e2'), Hole, c2);
+    | Some((t11, t12, c12)) =>
+      let (e2', c2) = mark_ana(ctx, t11, e2);
+      (Ap(e1', e2'), t12, c1 @ c12 @ c2);
     };
-  | Plus(e1, e2) => (
-      Plus(mark_ana(ctx, Num, e1), mark_ana(ctx, Num, e2)),
-      Num,
-    )
-  | Asc(e, t) => (Asc(mark_ana(ctx, t, e), t), t)
+  | Plus(e1, e2) =>
+    let (e1', c1) = mark_ana(ctx, Num, e1);
+    let (e2', c2) = mark_ana(ctx, Num, e2);
+    (Plus(e1', e2'), Num, c1 @ c2);
+  | Asc(e, t) =>
+    let (e', c) = mark_ana(ctx, t, e);
+    (Asc(e', t), t, c);
   | Mark(_) => failwith("impossible")
   };
 }
 
 // Precondition: e has no marks
-and mark_ana = (ctx: typctx, t: Htyp.t, e: Hexp.t): Hexp.t => {
-  let subsume = (e): Hexp.t => {
-    let (e', t') = mark_syn(ctx, e);
+and mark_ana =
+    (ctx: typctx, t: Htyp.t, e: Hexp.t): (Hexp.t, list(constramnot)) => {
+  let subsume = (e): (Hexp.t, list(constramnot)) => {
+    let (e', t', c) = mark_syn(ctx, e);
     if (type_consistent(t, t')) {
-      e';
+      (
+        e',
+        c @ [()] // TODO
+      );
     } else {
-      Mark(e', Inconsistent);
+      (
+        // NOTE: in the paper, there's a constraint generated here. I don't think we need it.
+        Mark(e', Inconsistent),
+        [],
+      );
     };
   };
   switch (e) {
   | Lam(x, t', body) =>
     switch (matched_arrow_typ(t)) {
     | None => subsume(e)
-    | Some((t1, t2)) =>
-      let body' = mark_ana(TypCtx.add(x, t', ctx), t2, body);
+    | Some((t1, t2, c1)) =>
+      let (body', c2) = mark_ana(TypCtx.add(x, t', ctx), t2, body);
       if (type_consistent(t1, t')) {
-        Lam(x, t', body');
+        (
+          Lam(x, t', body'),
+          c1 @ c2 @ [()] // TODO
+        );
       } else {
-        Mark(Lam(x, t', body'), LamAscIncon);
+        (Mark(Lam(x, t', body'), LamAscIncon), c1 @ c2);
       };
     }
   | _ => subsume(e)
