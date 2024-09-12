@@ -111,7 +111,7 @@ module Action = {
 module TypCtx = Map.Make(String);
 type typctx = TypCtx.t(Htyp.t);
 
-type constramnot = unit; //(Htyp.t, Htyp.t);
+type constramnot = (Htyp.t, Htyp.t);
 
 exception Unimplemented;
 
@@ -150,7 +150,12 @@ let matched_arrow_typ =
     (t: Htyp.t): option((Htyp.t, Htyp.t, list(constramnot))) => {
   switch (t) {
   | Arrow(t1, t2) => Some((t1, t2, []))
-  | Hole(u) => Some((Hole(LArrow(u)), Hole(RArrow(u)), [()])) // [(Hole(u), Arrow(Hole(LArrow(u)), Hole(RArrow(u))))])) // TODO
+  | Hole(u) =>
+    Some((
+      Hole(LArrow(u)),
+      Hole(RArrow(u)),
+      [(Hole(u), Arrow(Hole(LArrow(u)), Hole(RArrow(u))))],
+    ))
   | _ => None
   };
 };
@@ -170,8 +175,8 @@ let matched_arrow_typ =
 
 let rec type_consistent = (t1: Htyp.t, t2: Htyp.t): bool => {
   switch (t1, t2) {
-  | (Hole(_), _) => true
-  | (_, Hole(_)) => true
+  | (Hole(_), _)
+  | (_, Hole(_))
   | (Num, Num) => true
   | (Arrow(t11, t12), Arrow(t21, t22)) =>
     type_consistent(t11, t21) && type_consistent(t12, t22)
@@ -225,10 +230,7 @@ and mark_ana =
   let subsume = (e): (Hexp.t, list(constramnot)) => {
     let (e', t', c) = mark_syn(ctx, e);
     if (type_consistent(t, t')) {
-      (
-        e',
-        c @ [()] // TODO
-      );
+      (e', c @ [(t, t')]);
     } else {
       (
         // NOTE: in the paper, there's a constraint generated here. I don't think we need it.
@@ -244,10 +246,7 @@ and mark_ana =
     | Some((t1, t2, c1)) =>
       let (body', c2) = mark_ana(TypCtx.add(x, t', ctx), t2, body);
       if (type_consistent(t1, t')) {
-        (
-          Lam(x, t', body'),
-          c1 @ c2 @ [()] // TODO
-        );
+        (Lam(x, t', body'), c1 @ c2 @ [(t1, t')]);
       } else {
         (Mark(Lam(x, t', body'), fresh_id(), LamAscIncon), c1 @ c2);
       };
