@@ -3,14 +3,27 @@ open Sexplib.Std;
 
 let compare_string = String.compare;
 let compare_int = Int.compare;
-// let compare_bool = Bool.compare;
+
+module Id = {
+  [@deriving (sexp, compare)]
+  type t = int;
+};
+
+module Prov = {
+  [@deriving (sexp, compare)]
+  type t =
+    | Surface(Id.t) // Type hole in the surface syntax
+    | Syn(Id.t) // Type hole synthesized from empty hole or mark in the surface syntax
+    | ArrowL(t)
+    | ArrowR(t);
+};
 
 module Htyp = {
   [@deriving (sexp, compare)]
   type t =
     | Arrow(t, t)
     | Num
-    | Hole;
+    | Hole(Prov.t);
 };
 
 module Ztyp = {
@@ -39,8 +52,8 @@ module Hexp = {
     | Lam(string, Htyp.t, t) // \x:t.e
     | Ap(t, t) // e e
     | Asc(t, Htyp.t) // e : t
-    | EHole // hole
-    | Mark(t, Mark.t); // mark
+    | EHole(Id.t) // hole
+    | Mark(t, Id.t, Mark.t); // mark
 };
 
 module Zexp = {
@@ -55,7 +68,7 @@ module Zexp = {
     | RAsc(Hexp.t, Ztyp.t)
     | LAp(t, Hexp.t)
     | RAp(Hexp.t, t)
-    | Mark(t, Mark.t);
+    | Mark(t, Id.t, Mark.t);
 };
 
 module Child = {
@@ -97,7 +110,7 @@ module Action = {
 module TypCtx = Map.Make(String);
 type typctx = TypCtx.t(Htyp.t);
 
-type constramnot = unit;
+type constramnot = unit; //(Htyp.t, Htyp.t);
 
 exception Unimplemented;
 
@@ -121,7 +134,7 @@ let rec erase_exp = (e: Zexp.t): Hexp.t => {
   | RAp(et, zt) => Ap(et, erase_exp(zt))
   | LPlus(zt, et) => Plus(erase_exp(zt), et)
   | RPlus(et, zt) => Plus(et, erase_exp(zt))
-  | Mark(e, m) => Mark(erase_exp(e), m)
+  | Mark(e, u, m) => Mark(erase_exp(e), u, m)
   };
 };
 
@@ -155,6 +168,78 @@ let rec type_consistent = (t1: Htyp.t, t2: Htyp.t): bool => {
   | (Arrow(t11, t12), Arrow(t21, t22)) =>
     type_consistent(t11, t21) && type_consistent(t12, t22)
   | _ => false
+  };
+};
+
+// Precondition: e has no marks
+let rec mark_syn =
+        (ctx: typctx, e: Hexp.t): (Hexp.t, Htyp.t, list(constramnot)) => {
+  switch (e) {
+  | Var(x) =>
+    switch (TypCtx.find_opt(x, ctx)) {
+    | None => (Mark(e, Free), Hole, [])
+    | Some(t) => (e, t, [])
+    }
+  | NumLit(_) => (e, Num, [])
+  | EHole => (e, Hole, [])
+  | Lam(x, t, e) =>
+    let (e', t', c) = mark_syn(TypCtx.add(x, t, ctx), e);
+    (Lam(x, t, e'), Arrow(t, t'), c);
+  | Ap(e1, e2) =>
+    let (e1', t1, c1) = mark_syn(ctx, e1);
+    switch (matched_arrow_typ(t1)) {
+    | None =>
+      let (e2', c2) = mark_ana(ctx, Hole, e2);
+      (Ap(Mark(e1', NonArrowAp), e2'), Hole, c2);
+    | Some((t11, t12, c12)) =>
+      let (e2', c2) = mark_ana(ctx, t11, e2);
+      (Ap(e1', e2'), t12, c1 @ c12 @ c2);
+    };
+  | Plus(e1, e2) =>
+    let (e1', c1) = mark_ana(ctx, Num, e1);
+    let (e2', c2) = mark_ana(ctx, Num, e2);
+    (Plus(e1', e2'), Num, c1 @ c2);
+  | Asc(e, t) =>
+    let (e', c) = mark_ana(ctx, t, e);
+    (Asc(e', t), t, c);
+  | Mark(_) => failwith("impossible")
+  };
+}
+
+// Precondition: e has no marks
+and mark_ana =
+    (ctx: typctx, t: Htyp.t, e: Hexp.t): (Hexp.t, list(constramnot)) => {
+  let subsume = (e): (Hexp.t, list(constramnot)) => {
+    let (e', t', c) = mark_syn(ctx, e);
+    if (type_consistent(t, t')) {
+      (
+        e',
+        c @ [()] // TODO
+      );
+    } else {
+      (
+        // NOTE: in the paper, there's a constraint generated here. I don't think we need it.
+        Mark(e', Inconsistent),
+        [],
+      );
+    };
+  };
+  switch (e) {
+  | Lam(x, t', body) =>
+    switch (matched_arrow_typ(t)) {
+    | None => subsume(e)
+    | Some((t1, t2, c1)) =>
+      let (body', c2) = mark_ana(TypCtx.add(x, t', ctx), t2, body);
+      if (type_consistent(t1, t')) {
+        (
+          Lam(x, t', body'),
+          c1 @ c2 @ [()] // TODO
+        );
+      } else {
+        (Mark(Lam(x, t', body'), LamAscIncon), c1 @ c2);
+      };
+    }
+  | _ => subsume(e)
   };
 };
 
@@ -377,78 +462,6 @@ let rec exp_action = (e: Zexp.t, a: Action.t): Zexp.t => {
     | RAsc(h_exp, z_typ) => RAsc(h_exp, typ_action(z_typ, a))
     | Mark(_) => failwith("impossible")
     }
-  };
-};
-
-// Precondition: e has no marks
-let rec mark_syn =
-        (ctx: typctx, e: Hexp.t): (Hexp.t, Htyp.t, list(constramnot)) => {
-  switch (e) {
-  | Var(x) =>
-    switch (TypCtx.find_opt(x, ctx)) {
-    | None => (Mark(e, Free), Hole, [])
-    | Some(t) => (e, t, [])
-    }
-  | NumLit(_) => (e, Num, [])
-  | EHole => (e, Hole, [])
-  | Lam(x, t, e) =>
-    let (e', t', c) = mark_syn(TypCtx.add(x, t, ctx), e);
-    (Lam(x, t, e'), Arrow(t, t'), c);
-  | Ap(e1, e2) =>
-    let (e1', t1, c1) = mark_syn(ctx, e1);
-    switch (matched_arrow_typ(t1)) {
-    | None =>
-      let (e2', c2) = mark_ana(ctx, Hole, e2);
-      (Ap(Mark(e1', NonArrowAp), e2'), Hole, c2);
-    | Some((t11, t12, c12)) =>
-      let (e2', c2) = mark_ana(ctx, t11, e2);
-      (Ap(e1', e2'), t12, c1 @ c12 @ c2);
-    };
-  | Plus(e1, e2) =>
-    let (e1', c1) = mark_ana(ctx, Num, e1);
-    let (e2', c2) = mark_ana(ctx, Num, e2);
-    (Plus(e1', e2'), Num, c1 @ c2);
-  | Asc(e, t) =>
-    let (e', c) = mark_ana(ctx, t, e);
-    (Asc(e', t), t, c);
-  | Mark(_) => failwith("impossible")
-  };
-}
-
-// Precondition: e has no marks
-and mark_ana =
-    (ctx: typctx, t: Htyp.t, e: Hexp.t): (Hexp.t, list(constramnot)) => {
-  let subsume = (e): (Hexp.t, list(constramnot)) => {
-    let (e', t', c) = mark_syn(ctx, e);
-    if (type_consistent(t, t')) {
-      (
-        e',
-        c @ [()] // TODO
-      );
-    } else {
-      (
-        // NOTE: in the paper, there's a constraint generated here. I don't think we need it.
-        Mark(e', Inconsistent),
-        [],
-      );
-    };
-  };
-  switch (e) {
-  | Lam(x, t', body) =>
-    switch (matched_arrow_typ(t)) {
-    | None => subsume(e)
-    | Some((t1, t2, c1)) =>
-      let (body', c2) = mark_ana(TypCtx.add(x, t', ctx), t2, body);
-      if (type_consistent(t1, t')) {
-        (
-          Lam(x, t', body'),
-          c1 @ c2 @ [()] // TODO
-        );
-      } else {
-        (Mark(Lam(x, t', body'), LamAscIncon), c1 @ c2);
-      };
-    }
-  | _ => subsume(e)
   };
 };
 
