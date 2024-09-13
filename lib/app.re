@@ -2,171 +2,12 @@ open Core;
 open Incr_dom;
 open Monad_lib.Monad;
 module Hazelnut = Hazelnut_lib.Hazelnut;
-
-module Pexp = {
-  type t =
-    | Cursor(t)
-    | Arrow(t, t)
-    | Num
-    | Var(string)
-    | Lam(string, t, t)
-    | Ap(t, t)
-    | NumLit(int)
-    | Plus(t, t)
-    | Asc(t, t)
-    | EHole(string)
-    | MarkHole(t, string, string);
-};
-
-let string_of_mark: Hazelnut.Mark.t => string = {
-  fun
-  | Free => "Free"
-  | NonArrowAp => "NonArrowAp"
-  | LamAscIncon => "LamAscIncon"
-  | Inconsistent => "Inconsistent";
-};
-
-let string_of_id = (u: Hazelnut.Id.t): string => string_of_int(u);
-
-let rec string_of_provenance: Hazelnut.Prov.t => string =
-  fun
-  | Surface(u) => string_of_id(u)
-  | Syn(u) => "<=(" ++ string_of_id(u) ++ ")"
-  | LArrow(p) => "->L(" ++ string_of_provenance(p) ++ ")"
-  | RArrow(p) => "->R(" ++ string_of_provenance(p) ++ ")";
-
-let rec pexp_of_htyp: Hazelnut.Htyp.t => Pexp.t =
-  fun
-  | Arrow(t1, t2) => Arrow(pexp_of_htyp(t1), pexp_of_htyp(t2))
-  | Num => Num
-  | Hole(p) => EHole(string_of_provenance(p));
-
-let rec pexp_of_hexp: Hazelnut.Hexp.t => Pexp.t =
-  fun
-  | Var(x) => Var(x)
-  | Lam(x, a, e) => Lam(x, pexp_of_htyp(a), pexp_of_hexp(e))
-  | Ap(e1, e2) => Ap(pexp_of_hexp(e1), pexp_of_hexp(e2))
-  | NumLit(n) => NumLit(n)
-  | Plus(e1, e2) => Plus(pexp_of_hexp(e1), pexp_of_hexp(e2))
-  | Asc(e, t) => Asc(pexp_of_hexp(e), pexp_of_htyp(t))
-  | EHole(u) => EHole(string_of_id(u))
-  | Mark(e, u, m) =>
-    MarkHole(pexp_of_hexp(e), string_of_id(u), string_of_mark(m));
-
-let rec pexp_of_ztyp: Hazelnut.Ztyp.t => Pexp.t =
-  fun
-  | Cursor(t) => Cursor(pexp_of_htyp(t))
-  | LArrow(t1, t2) => Arrow(pexp_of_ztyp(t1), pexp_of_htyp(t2))
-  | RArrow(t1, t2) => Arrow(pexp_of_htyp(t1), pexp_of_ztyp(t2));
-
-let rec pexp_of_zexp: Hazelnut.Zexp.t => Pexp.t =
-  fun
-  | Cursor(e) => Cursor(pexp_of_hexp(e))
-  | LLam(x, a, e) => Lam(x, pexp_of_ztyp(a), pexp_of_hexp(e))
-  | RLam(x, a, e) => Lam(x, pexp_of_htyp(a), pexp_of_zexp(e))
-  | LAp(e1, e2) => Ap(pexp_of_zexp(e1), pexp_of_hexp(e2))
-  | RAp(e1, e2) => Ap(pexp_of_hexp(e1), pexp_of_zexp(e2))
-  | LPlus(e1, e2) => Plus(pexp_of_zexp(e1), pexp_of_hexp(e2))
-  | RPlus(e1, e2) => Plus(pexp_of_hexp(e1), pexp_of_zexp(e2))
-  | LAsc(e, t) => Asc(pexp_of_zexp(e), pexp_of_htyp(t))
-  | RAsc(e, t) => Asc(pexp_of_hexp(e), pexp_of_ztyp(t))
-  | Mark(e, u, m) =>
-    MarkHole(pexp_of_zexp(e), string_of_id(u), string_of_mark(m));
-
-// Lower is tighter
-let rec prec: Pexp.t => int =
-  fun
-  | Cursor(e) => prec(e)
-  | Arrow(_) => 1
-  | Num => 0
-  | Var(_) => 0
-  | Lam(_) => 0
-  | Ap(_) => 2
-  | NumLit(_) => 0
-  | Plus(_) => 3
-  | Asc(_) => 4
-  | EHole(_) => 0
-  | MarkHole(_) => 0;
-
-module Side = {
-  type t =
-    | Left
-    | Right
-    | Atom;
-};
-
-let rec assoc: Pexp.t => Side.t =
-  fun
-  | Cursor(e) => assoc(e)
-  | Arrow(_) => Right
-  | Num => Atom
-  | Var(_) => Atom
-  | Lam(_) => Atom
-  | Ap(_) => Left
-  | NumLit(_) => Atom
-  | Plus(_) => Left
-  | Asc(_) => Left
-  | EHole(_) => Atom
-  | MarkHole(_) => Atom;
-
-let rec string_of_pexp: Pexp.t => string =
-  fun
-  | Cursor(e) => "👉" ++ string_of_pexp(e) ++ "👈"
-  | Arrow(t1, t2) as outer =>
-    "("
-    ++ paren(t1, outer, Side.Left)
-    ++ " -> "
-    ++ paren(t2, outer, Side.Right)
-    ++ ")"
-  | Num => "Num"
-  | Var(x) => x
-  | Lam(x, a, e) =>
-    "(fun "
-    ++ x
-    ++ ": "
-    ++ string_of_pexp(a)
-    ++ " -> "
-    ++ string_of_pexp(e)
-    ++ ")"
-  | Ap(e1, e2) as outer =>
-    "("
-    ++ paren(e1, outer, Side.Left)
-    ++ " "
-    ++ paren(e2, outer, Side.Right)
-    ++ ")"
-  | NumLit(n) => string_of_int(n)
-  | Plus(e1, e2) as outer =>
-    paren(e1, outer, Side.Left) ++ " + " ++ paren(e2, outer, Side.Right)
-  | Asc(e, t) as outer =>
-    paren(e, outer, Side.Left) ++ " : " ++ paren(t, outer, Side.Right)
-  | EHole(p) => "{ " ++ p ++ " }"
-  | MarkHole(e, u, m) =>
-    "{ " ++ string_of_pexp(e) ++ " | " ++ m ++ " | " ++ u ++ " }"
-
-and paren = (inner: Pexp.t, outer: Pexp.t, side: Side.t): string => {
-  let unparenned = string_of_pexp(inner);
-  let parenned = "(" ++ unparenned ++ ")";
-
-  let prec_inner = prec(inner);
-  let prec_outer = prec(outer);
-
-  if (prec_inner < prec_outer) {
-    unparenned;
-  } else if (prec_inner > prec_outer) {
-    parenned;
-  } else {
-    switch (assoc(inner), side) {
-    | (Side.Left, Side.Right)
-    | (Side.Right, Side.Left) => parenned
-    | _ => unparenned
-    };
-  };
-};
+module Inference = Hazelnut_lib.Inference;
+module Printer = Hazelnut_lib.Printer;
 
 [@deriving (sexp, fields, compare)]
 type state = {
   e: Hazelnut.Zexp.t,
-  // t: Hazelnut.Htyp.t,
   warning: option(string),
   var_input: string,
   lam_input: string,
@@ -264,15 +105,17 @@ let view =
 
     let e_no_cursor = Hazelnut.erase_exp(e_cursor);
 
-    let (e_marked, t, _) =
+    let (e_marked, t, cs) =
       Hazelnut.mark_syn(Hazelnut.TypCtx.empty, e_no_cursor);
+
+    Inference.go(cs);
 
     let e_folded = Hazelnut.fold_zexp_mexp(e_cursor, e_marked);
 
     let expression =
       Node.div([
-        Node.p([Node.textf("%s", string_of_pexp(pexp_of_zexp(e_folded)))]),
-        Node.p([Node.textf("%s", string_of_pexp(pexp_of_htyp(t)))]),
+        Node.p([Node.textf("%s", Printer.string_of_zexp(e_folded))]),
+        Node.p([Node.textf("%s", Printer.string_of_htyp(t))]),
       ]);
 
     let buttons = {
