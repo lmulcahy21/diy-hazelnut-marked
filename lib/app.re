@@ -14,8 +14,8 @@ module Pexp = {
     | NumLit(int)
     | Plus(t, t)
     | Asc(t, t)
-    | EHole
-    | MarkHole(t, string);
+    | EHole(string)
+    | MarkHole(t, string, string);
 };
 
 let string_of_mark: Hazelnut.Mark.t => string = {
@@ -26,11 +26,20 @@ let string_of_mark: Hazelnut.Mark.t => string = {
   | Inconsistent => "Inconsistent";
 };
 
+let string_of_id = (u: Hazelnut.Id.t): string => string_of_int(u);
+
+let rec string_of_provenance: Hazelnut.Prov.t => string =
+  fun
+  | Surface(u) => string_of_id(u)
+  | Syn(u) => "<=(" ++ string_of_id(u) ++ ")"
+  | LArrow(p) => "->L(" ++ string_of_provenance(p) ++ ")"
+  | RArrow(p) => "->R(" ++ string_of_provenance(p) ++ ")";
+
 let rec pexp_of_htyp: Hazelnut.Htyp.t => Pexp.t =
   fun
   | Arrow(t1, t2) => Arrow(pexp_of_htyp(t1), pexp_of_htyp(t2))
   | Num => Num
-  | Hole => EHole;
+  | Hole(p) => EHole(string_of_provenance(p));
 
 let rec pexp_of_hexp: Hazelnut.Hexp.t => Pexp.t =
   fun
@@ -40,8 +49,9 @@ let rec pexp_of_hexp: Hazelnut.Hexp.t => Pexp.t =
   | NumLit(n) => NumLit(n)
   | Plus(e1, e2) => Plus(pexp_of_hexp(e1), pexp_of_hexp(e2))
   | Asc(e, t) => Asc(pexp_of_hexp(e), pexp_of_htyp(t))
-  | EHole => EHole
-  | Mark(e, m) => MarkHole(pexp_of_hexp(e), string_of_mark(m));
+  | EHole(u) => EHole(string_of_id(u))
+  | Mark(e, u, m) =>
+    MarkHole(pexp_of_hexp(e), string_of_id(u), string_of_mark(m));
 
 let rec pexp_of_ztyp: Hazelnut.Ztyp.t => Pexp.t =
   fun
@@ -60,7 +70,8 @@ let rec pexp_of_zexp: Hazelnut.Zexp.t => Pexp.t =
   | RPlus(e1, e2) => Plus(pexp_of_hexp(e1), pexp_of_zexp(e2))
   | LAsc(e, t) => Asc(pexp_of_zexp(e), pexp_of_htyp(t))
   | RAsc(e, t) => Asc(pexp_of_hexp(e), pexp_of_ztyp(t))
-  | Mark(e, m) => MarkHole(pexp_of_zexp(e), string_of_mark(m));
+  | Mark(e, u, m) =>
+    MarkHole(pexp_of_zexp(e), string_of_id(u), string_of_mark(m));
 
 // Lower is tighter
 let rec prec: Pexp.t => int =
@@ -74,8 +85,8 @@ let rec prec: Pexp.t => int =
   | NumLit(_) => 0
   | Plus(_) => 3
   | Asc(_) => 4
-  | EHole => 0
-  | MarkHole(_, _) => 0;
+  | EHole(_) => 0
+  | MarkHole(_) => 0;
 
 module Side = {
   type t =
@@ -95,34 +106,42 @@ let rec assoc: Pexp.t => Side.t =
   | NumLit(_) => Atom
   | Plus(_) => Left
   | Asc(_) => Left
-  | EHole => Atom
-  | MarkHole(_, _) => Atom;
+  | EHole(_) => Atom
+  | MarkHole(_) => Atom;
 
 let rec string_of_pexp: Pexp.t => string =
   fun
   | Cursor(e) => "👉" ++ string_of_pexp(e) ++ "👈"
   | Arrow(t1, t2) as outer =>
-    paren(t1, outer, Side.Left) ++ " -> " ++ paren(t2, outer, Side.Right)
+    "("
+    ++ paren(t1, outer, Side.Left)
+    ++ " -> "
+    ++ paren(t2, outer, Side.Right)
+    ++ ")"
   | Num => "Num"
   | Var(x) => x
   | Lam(x, a, e) =>
-    "fun "
+    "(fun "
     ++ x
     ++ ": "
     ++ string_of_pexp(a)
-    ++ " -> {"
+    ++ " -> "
     ++ string_of_pexp(e)
-    ++ "}"
-
+    ++ ")"
   | Ap(e1, e2) as outer =>
-    paren(e1, outer, Side.Left) ++ " " ++ paren(e2, outer, Side.Right)
+    "("
+    ++ paren(e1, outer, Side.Left)
+    ++ " "
+    ++ paren(e2, outer, Side.Right)
+    ++ ")"
   | NumLit(n) => string_of_int(n)
   | Plus(e1, e2) as outer =>
     paren(e1, outer, Side.Left) ++ " + " ++ paren(e2, outer, Side.Right)
   | Asc(e, t) as outer =>
-    paren(e, outer, Side.Left) ++ ": " ++ paren(t, outer, Side.Right)
-  | EHole => "[ ]"
-  | MarkHole(e, m) => "[ " ++ string_of_pexp(e) ++ "| " ++ m ++ "| ]"
+    paren(e, outer, Side.Left) ++ " : " ++ paren(t, outer, Side.Right)
+  | EHole(p) => "{ " ++ p ++ " }"
+  | MarkHole(e, u, m) =>
+    "{ " ++ string_of_pexp(e) ++ " | " ++ m ++ " | " ++ u ++ " }"
 
 and paren = (inner: Pexp.t, outer: Pexp.t, side: Side.t): string => {
   let unparenned = string_of_pexp(inner);
@@ -164,8 +183,7 @@ module Model = {
 
   let init = (): t =>
     set({
-      e: Cursor(EHole),
-      // t: Hole,
+      e: Cursor(EHole(Hazelnut.fresh_id())),
       warning: None,
       var_input: "",
       lam_input: "",
@@ -246,7 +264,7 @@ let view =
 
     let e_no_cursor = Hazelnut.erase_exp(e_cursor);
 
-    let (e_marked, t) =
+    let (e_marked, t, _) =
       Hazelnut.mark_syn(Hazelnut.TypCtx.empty, e_no_cursor);
 
     let e_folded = Hazelnut.fold_zexp_mexp(e_cursor, e_marked);

@@ -14,7 +14,6 @@ module Prov = {
   type t =
     | Surface(Id.t) // Type hole in the surface syntax
     | Syn(Id.t) // Type hole synthesized from empty hole or mark in the surface syntax
-    | Arg(Id.t) // Hole analyzed onto application argument if no function type available. Unique fresh ID.
     | LArrow(t)
     | RArrow(t);
 };

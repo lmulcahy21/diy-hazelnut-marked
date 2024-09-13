@@ -1,9 +1,23 @@
+module Id: {
+  [@deriving (sexp, compare)]
+  type t = int;
+};
+
+module Prov: {
+  [@deriving (sexp, compare)]
+  type t =
+    | Surface(Id.t)
+    | Syn(Id.t)
+    | LArrow(t)
+    | RArrow(t);
+};
+
 module Htyp: {
   [@deriving (sexp, compare)]
   type t =
     | Arrow(t, t)
     | Num
-    | Hole;
+    | Hole(Prov.t);
 };
 
 module Ztyp: {
@@ -32,8 +46,8 @@ module Hexp: {
     | Lam(string, Htyp.t, t) // \x:t.e
     | Ap(t, t) // e e
     | Asc(t, Htyp.t) // e : t
-    | EHole // hole
-    | Mark(t, Mark.t); // mark
+    | EHole(Id.t) // hole
+    | Mark(t, Id.t, Mark.t); // mark
 };
 
 module Zexp: {
@@ -48,7 +62,7 @@ module Zexp: {
     | RAsc(Hexp.t, Ztyp.t)
     | LAp(t, Hexp.t)
     | RAp(Hexp.t, t)
-    | Mark(t, Mark.t);
+    | Mark(t, Id.t, Mark.t);
 };
 
 module Child: {
@@ -93,11 +107,14 @@ module TypCtx: {
 };
 type typctx = TypCtx.t(Htyp.t);
 
+type constramnot = (Htyp.t, Htyp.t);
+
 exception Unimplemented;
 
+let fresh_id: unit => Id.t;
 let erase_exp: Zexp.t => Hexp.t;
 // let syn: (typctx, Hexp.t) => option(Htyp.t);
 // let ana: (typctx, Hexp.t, Htyp.t) => bool;
 let exp_action: (Zexp.t, Action.t) => Zexp.t;
-let mark_syn: (typctx, Hexp.t) => (Hexp.t, Htyp.t);
+let mark_syn: (typctx, Hexp.t) => (Hexp.t, Htyp.t, list(constramnot));
 let fold_zexp_mexp: (Zexp.t, Hexp.t) => Zexp.t;
