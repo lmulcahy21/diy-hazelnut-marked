@@ -1,19 +1,21 @@
 open Hazelnut;
 open Printer;
 
-type canonical_constramnot = (Prov.t, Htyp.t);
+type canonical_constramnot =
+  | Con(Prov.t, Htyp.t);
 
 // precondition: recieves a consistent constramnot
 // postondition: returns an equivalent list of canonical (left side is hole) constriants
 let rec unfold_constramnot: constramnot => list(canonical_constramnot) =
   fun
-  | (Hole(p), t) => [(p, t)]
-  | (t, Hole(p)) => [(p, t)]
-  | (Num, Num) => []
-  | (Arrow(t1, t2), Arrow(t3, t4)) =>
-    unfold_constramnot((t1, t3)) @ unfold_constramnot((t2, t4))
-  | (Num, Arrow(_))
-  | (Arrow(_), Num) => failwith("impossible");
+  | Con(Hole(p), t) => [Con(p, t)]
+  | Con(t, Hole(p)) => [Con(p, t)]
+  | Con(Num, Num) => []
+  | Con(Arrow(t1, t2), Arrow(t3, t4)) =>
+    unfold_constramnot(Con(t1, t3): constramnot)
+    @ unfold_constramnot(Con(t2, t4))
+  | Con(Num, Arrow(_))
+  | Con(Arrow(_), Num) => failwith("impossible");
 
 let unfold_constramnots: list(constramnot) => list(canonical_constramnot) =
   List.concat_map(unfold_constramnot);
@@ -40,6 +42,8 @@ type data_elem = UnionFind.elem(data);
 type prov_map = StringMap.t(data_elem);
 let lookup = (p: Prov.t, m: prov_map): data_elem =>
   StringMap.find(string_of_prov(p), m);
+let lookup_get = (p: Prov.t, m: prov_map): data =>
+  UnionFind.get(lookup(p, m));
 
 let merge_data = ((l1, l2): data, (l3, l4): data): data => (
   l1 @ l3,
@@ -61,12 +65,12 @@ let add_if_absent = (p: Prov.t, m: prov_map): prov_map =>
 let update_prov_map_of_constramnot =
     (c: canonical_constramnot, m: prov_map): prov_map => {
   switch (c) {
-  | (p, Hole(q)) =>
+  | Con(p, Hole(q)) =>
     let m = add_if_absent(p, m);
     let m = add_if_absent(q, m);
     let _ = UnionFind.merge(merge_data, lookup(p, m), lookup(q, m));
     m;
-  | (p, t) =>
+  | Con(p, t) =>
     let m = add_if_absent(p, m);
     let qs = provs_in_typ(t);
     let m = List.fold_left((m, q) => add_if_absent(q, m), m, qs);
@@ -84,7 +88,73 @@ let prov_map_of_constramnots = (cs: list(canonical_constramnot)): prov_map => {
   );
 };
 
-let string_of_constramnot = ((t1, t2): constramnot): string => {
+let find_dominant_provs = (m: prov_map): list(string) => {
+  switch (
+    List.filter(
+      ((_, p)) => List.length(fst(UnionFind.get(p))) == 0,
+      StringMap.bindings(m),
+    )
+  ) {
+  | [] => []
+  | [(p, _), ..._] => [p]
+  };
+};
+
+type solution =
+  | Hole
+  | Num
+  | Arrow(solution, solution)
+  | Multi(list(solution)) // Nums before arrows
+  | Cyclic;
+
+let rec refine_solution = (s: solution, t: Htyp.t): solution => {
+  switch (s, t) {
+  | (s, Hole(_)) => s
+  | (Hole, Num) => Num
+  | (Hole, Arrow(t1, t2)) =>
+    Arrow(refine_solution(Hole, t1), refine_solution(Hole, t2))
+  | (Num, Num) => Num
+  | (Num, Arrow(t1, t2)) =>
+    Multi([
+      Num,
+      Arrow(refine_solution(Hole, t1), refine_solution(Hole, t2)),
+    ])
+  | (Arrow(s1, s2), Num) => Multi([Num, Arrow(s1, s2)])
+  | (Arrow(s1, s2), Arrow(t1, t2)) =>
+    Arrow(refine_solution(s1, t1), refine_solution(s2, t2))
+  | (Multi(ss), t) => Multi(ss @ [refine_solution(Hole, t)]) // TODO: compress possibilities
+  // | (Multi([]), _)
+  // | (Multi([Hole, ..._]), _)
+  // | (Multi([Multi(_), ..._]), _)
+  // | (Multi([Cyclic, ..._]), _) => failwith("impossible")
+  // | (Multi([Num, ...ss]), Num) => Multi([Num, ...ss])
+  // | (Multi([Arrow(s1, s2), ...ss]), Num) =>
+  //   Multi([Num, Arrow(s1, s2), ...ss])
+  // | (Multi([Num, ...ss]), Arrow(t1, t2)) => Multi(todo)
+  // | (Multi(ss), Arrow(t1, t2)) => Multi(todo)
+  | (Cyclic, _) => Cyclic
+  };
+};
+
+let solve_prov = (p: string, m: prov_map): solution => {
+  let (_, ts) = UnionFind.get(StringMap.find(p, m));
+  List.fold_left(refine_solution, Hole, ts);
+};
+
+let rec solution_typ = (p: Prov.t, s: solution): Htyp.t => {
+  switch (s) {
+  | Hole => Hole(p)
+  | Num => Num
+  | Arrow(s1, s2) =>
+    Arrow(solution_typ(LArrow(p), s1), solution_typ(RArrow(p), s2))
+  | Multi(_) => Hole(p)
+  | Cyclic => Hole(p)
+  };
+};
+
+let replace_prov_with_solution_typ = (p: Prov.t, t: Htyp.t, st: Htyp.t) => {};
+
+let string_of_constramnot = (Con(t1, t2): constramnot): string => {
   string_of_htyp(t1) ++ "~" ++ string_of_htyp(t2);
 };
 
@@ -92,8 +162,12 @@ let string_of_constramnots = (cs: list(constramnot)): string => {
   "{" ++ String.concat("\n", List.map(string_of_constramnot, cs)) ++ "}";
 };
 
-let string_of_data = ((ps, _): data): string =>
-  String.concat(" | ", List.map(string_of_prov, ps));
+let string_of_data = ((ps, ts): data): string =>
+  "["
+  ++ String.concat(", ", List.map(string_of_prov, ps))
+  ++ "] | ["
+  ++ String.concat(", ", List.map(string_of_htyp, ts))
+  ++ "]";
 
 let string_of_map = (m: prov_map): string => {
   let f: ((string, data_elem)) => string =
@@ -101,6 +175,9 @@ let string_of_map = (m: prov_map): string => {
   let l: list((string, data_elem)) = StringMap.bindings(m);
   "{" ++ String.concat("\n", List.map(f, l)) ++ "}";
 };
+
+// Note: when removing a provenance p after solving it:
+// If it was solved as inconsistent, remove all provs that end in p, recursively
 
 let go = (cs: list(constramnot)): unit => {
   print_endline("-----GO-----");

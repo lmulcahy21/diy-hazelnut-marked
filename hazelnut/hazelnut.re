@@ -110,7 +110,8 @@ module Action = {
 module TypCtx = Map.Make(String);
 type typctx = TypCtx.t(Htyp.t);
 
-type constramnot = (Htyp.t, Htyp.t);
+type constramnot =
+  | Con(Htyp.t, Htyp.t);
 
 exception Unimplemented;
 
@@ -153,7 +154,7 @@ let matched_arrow_typ =
     Some((
       Hole(LArrow(u)),
       Hole(RArrow(u)),
-      [(Hole(u), Arrow(Hole(LArrow(u)), Hole(RArrow(u))))],
+      [Con(Hole(u), Arrow(Hole(LArrow(u)), Hole(RArrow(u))))],
     ))
   | _ => None
   };
@@ -229,7 +230,7 @@ and mark_ana =
   let subsume = (e): (Hexp.t, list(constramnot)) => {
     let (e', t', c) = mark_syn(ctx, e);
     if (type_consistent(t, t')) {
-      (e', c @ [(t, t')]);
+      (e', c @ [Con(t, t')]);
     } else {
       (
         // NOTE: in the paper, there's a constraint generated here. I don't think we need it.
@@ -245,7 +246,7 @@ and mark_ana =
     | Some((t1, t2, c1)) =>
       let (body', c2) = mark_ana(TypCtx.add(x, t', ctx), t2, body);
       if (type_consistent(t1, t')) {
-        (Lam(x, t', body'), c1 @ c2 @ [(t1, t')]);
+        (Lam(x, t', body'), c1 @ c2 @ [Con(t1, t')]);
       } else {
         (Mark(Lam(x, t', body'), fresh_id(), LamAscIncon), c1 @ c2);
       };
@@ -253,64 +254,6 @@ and mark_ana =
   | _ => subsume(e)
   };
 };
-
-// let rec syn = (ctx: typctx, e: Hexp.t): option(Htyp.t) => {
-//   switch (e) {
-//   | Var(name) => TypCtx.find_opt(name, ctx)
-//   | Lam(arg_name, type_asc, body) =>
-//     let* t2 = syn(TypCtx.add(arg_name, type_asc, ctx), body);
-//     Some(Htyp.Arrow(type_asc, t2));
-//   | Ap(func, arg) =>
-//     let* t1 = syn(ctx, func);
-//     let* (t2, t) = matched_arrow_typ(t1);
-//     if (ana(ctx, arg, t2)) {
-//       Some(t);
-//     } else {
-//       None;
-//     };
-//   | Asc(e, t) =>
-//     if (ana(ctx, e, t)) {
-//       Some(t);
-//     } else {
-//       None;
-//     }
-//   | NumLit(_) => Some(Htyp.Num)
-//   | Plus(arg1, arg2) =>
-//     let e1_ana = ana(ctx, arg1, Htyp.Num);
-//     let e2_ana = ana(ctx, arg2, Htyp.Num);
-//     if (e1_ana && e2_ana) {
-//       Some(Htyp.Num);
-//     } else {
-//       None;
-//     };
-//   | EHole => Some(Htyp.Hole)
-//   | Mark(exp, _) =>
-//     switch (syn(ctx, exp)) {
-//     | Some(_) => Some(Htyp.Hole)
-//     | None => None
-//     }
-//   };
-// }
-// and ana = (ctx: typctx, e: Hexp.t, t: Htyp.t): bool => {
-//   switch (e) {
-//   | Lam(var_name, asc, body) =>
-//     let a = matched_arrow_typ(t);
-//     switch (a) {
-//     | Some((t1, t2)) =>
-//       if (type_consistent(t1, asc)) {
-//         ana(TypCtx.add(var_name, asc, ctx), body, t2);
-//       } else {
-//         false;
-//       }
-//     | _ => false
-//     };
-//   | _ =>
-//     switch (syn(ctx, e)) {
-//     | Some(t') => type_consistent(t, t')
-//     | None => false
-//     }
-//   };
-// };
 
 let rec move_typ = (t: Ztyp.t, a: Dir.t): Ztyp.t => {
   switch (t) {

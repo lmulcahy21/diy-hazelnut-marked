@@ -107,7 +107,8 @@ module TypCtx: {
 };
 type typctx = TypCtx.t(Htyp.t);
 
-type constramnot = (Htyp.t, Htyp.t);
+type constramnot =
+  | Con(Htyp.t, Htyp.t);
 
 exception Unimplemented;
 
