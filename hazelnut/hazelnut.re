@@ -23,7 +23,8 @@ module Htyp = {
   type t =
     | Arrow(t, t)
     | Num
-    | Hole(Prov.t);
+    | Hole(Prov.t)
+    | EHole;
 };
 
 module Ztyp = {
@@ -156,6 +157,7 @@ let matched_arrow_typ =
       Hole(RArrow(u)),
       [Con(Hole(u), Arrow(Hole(LArrow(u)), Hole(RArrow(u))))],
     ))
+  | EHole => Some((EHole, EHole, []))
   | _ => None
   };
 };
@@ -177,6 +179,8 @@ let rec type_consistent = (t1: Htyp.t, t2: Htyp.t): bool => {
   switch (t1, t2) {
   | (Hole(_), _)
   | (_, Hole(_))
+  | (EHole, _)
+  | (_, EHole)
   | (Num, Num) => true
   | (Arrow(t11, t12), Arrow(t21, t22)) =>
     type_consistent(t11, t21) && type_consistent(t12, t22)

@@ -17,7 +17,8 @@ module Htyp: {
   type t =
     | Arrow(t, t)
     | Num
-    | Hole(Prov.t);
+    | Hole(Prov.t)
+    | EHole; // not to be unified
 };
 
 module Ztyp: {
