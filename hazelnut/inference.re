@@ -8,10 +8,10 @@ type canonical_constramnot =
 // postondition: returns an equivalent list of canonical (left side is hole) constriants
 let rec unfold_constramnot: constramnot => list(canonical_constramnot) =
   fun
-  | Con(EHole, _) => []
-  | Con(_, EHole) => []
   | Con(Hole(p), t) => [Con(p, t)]
   | Con(t, Hole(p)) => [Con(p, t)]
+  | Con(EHole, _) => []
+  | Con(_, EHole) => []
   | Con(Num, Num) => []
   | Con(Arrow(t1, t2), Arrow(t3, t4)) =>
     unfold_constramnot(Con(t1, t3): constramnot)
@@ -178,147 +178,7 @@ let solution_typ = (s: solution): Htyp.t => {
   };
 };
 
-// let rec alter_hole_once_solved = (p : Prov.t, q: Prov.t, st: Htyp.t, m : prov_map) : Htyp.t => {
-//   let eq(p', q') = UnionFind.eq(lookup(p', m), lookup(q', m));
-//   if (eq(p,q)) { st } else {
-//     switch(q, st) {
-//       | (LArrow(q), Arrow(s1, s2)) => {
-//         switch(alter_hole_once_solved(p))
-//       }
-//       | _ => failwith("un")
-//     }
-//   }
-// }
-
-// let rec subtype_of_provenance = (p: Prov.t, q : Prov.t, st : Htyp.t) : Htyp.t => {
-//   switch(q) {
-//     | Surface(u)
-//     | Syn(u) => if( p == q ) {st} else {Hole(q)}
-//     | LArrow(q) => switch(subtype_of_provenance(p, q, st)) {
-//       | EHole => EHole
-//       | Hole()
-//     }
-//   }
-// }
-
-let rec solution_typ_replace_typ =
-        (p: Prov.t, t: Htyp.t, st: Htyp.t, m: prov_map): Htyp.t => {
-  switch (t) {
-  // | Hole(q) when UnionFind.eq(lookup(p, m), lookup(q, m)) => st
-  | Hole(q) when p == q => st
-  // | Hole(q) => Hole(q)
-  | Hole(Surface(u)) => Hole(Surface(u))
-  | Hole(Syn(u)) => Hole(Syn(u))
-  | Hole(LArrow(q)) =>
-    switch (solution_typ_replace_typ(p, Hole(q), st, m)) {
-    | EHole => EHole
-    | Num => EHole
-    | Hole(_) => Hole(LArrow(q)) //Hole(LArrow(q'))
-    | Arrow(_, _) => Hole(LArrow(q)) // t1
-    }
-  | Hole(RArrow(q)) =>
-    switch (solution_typ_replace_typ(p, Hole(q), st, m)) {
-    | EHole => EHole
-    | Num => EHole
-    | Hole(_) => Hole(RArrow(q)) //Hole(RArrow(q'))
-    | Arrow(_, _) => Hole(RArrow(q)) //t2
-    }
-  | EHole => EHole
-  | Num => Num
-  | Arrow(t1, t2) =>
-    Arrow(
-      solution_typ_replace_typ(p, t1, st, m),
-      solution_typ_replace_typ(p, t2, st, m),
-    )
-  };
-};
-
-let rec solution_replace_solution =
-        (p: Prov.t, s: solution, s': solution): solution => {
-  switch (s) {
-  | Hole(q) when p == q => s'
-  | Hole(_) => s
-  | Cyclic => s
-  | Multi(_) => s
-  | EHole => s
-  | Num => Num
-  | Arrow(s1, s2) =>
-    Arrow(
-      solution_replace_solution(p, s1, s'),
-      solution_replace_solution(p, s2, s'),
-    )
-  };
-};
-
-let solution_typ_replace_con =
-    (p: Prov.t, Con(t1, t2): constramnot, st: Htyp.t, m: prov_map)
-    : constramnot => {
-  Con(
-    solution_typ_replace_typ(p, t1, st, m),
-    solution_typ_replace_typ(p, t2, st, m),
-  );
-};
-
-let solution_typ_replace_cons =
-    (p: Prov.t, cs: list(constramnot), st: Htyp.t, m: prov_map)
-    : list(constramnot) =>
-  List.map(c => solution_typ_replace_con(p, c, st, m), cs);
-
 type sol_map = StringMap.t(solution);
-
-let extend_sol_map =
-    (cs: list(constramnot), sm: sol_map)
-    : option((list(constramnot), sol_map)) => {
-  let canonical_cs = unfold_constramnots(cs); // make constraints canonical
-  let m = prov_map_of_constramnots(canonical_cs); // compute provenance map
-  switch (find_dominant_provs(m)) {
-  // if you find a dominant provenance...
-  | [] => None
-  | [p, ..._] =>
-    Some(
-      {
-        let s = solve_prov(p, m); // solve it
-        print_endline("solved " ++ string_of_prov(p));
-        let st = solution_typ(s); // turn it into a type
-        let ps =
-          List.filter_map(
-            ((p', p_elem)) =>
-              if (UnionFind.eq(lookup(p, m), StringMap.find(p', m))) {
-                let (canonical_p, _, _) = UnionFind.get(p_elem);
-                Some(canonical_p);
-              } else {
-                None;
-              },
-            StringMap.bindings(m),
-          );
-        let cs' =
-          List.fold_left(
-            (cs_acc, pss) => solution_typ_replace_cons(pss, cs_acc, st, m),
-            cs,
-            ps,
-          ); // replace it with the solution type in constraints
-        // let sm' = solution_typ_replace_sol_map(...)
-        let sm' =
-          List.fold_left(
-            (sm_acc, pss) => StringMap.add(string_of_prov(pss), s, sm_acc),
-            sm,
-            ps,
-          ); // and extend the solution map
-        let sm'' =
-          List.fold_left(
-            (sm_acc, pss) =>
-              StringMap.map(
-                sol => solution_replace_solution(pss, sol, s),
-                sm_acc,
-              ),
-            sm',
-            ps,
-          ); // and replace it with the solution in the existing solutions
-        (cs', sm'');
-      },
-    )
-  };
-};
 
 let string_of_constramnot = (Con(t1, t2): constramnot): string => {
   string_of_htyp(t1) ++ "~" ++ string_of_htyp(t2);
@@ -360,8 +220,131 @@ let string_of_sol_map = (m: sol_map): string => {
   "{" ++ String.concat("\n", List.map(f, l)) ++ "}";
 };
 
-// Note: when removing a provenance p after solving it:
-// If it was solved as inconsistent, remove all provs that end in p, recursively
+let rec solution_typ_replace_typ =
+        (p: string, t: Htyp.t, st: Htyp.t, m: prov_map): Htyp.t => {
+  switch (t) {
+  // | Hole(q) when UnionFind.eq(lookup(p, m), lookup(q, m)) => st
+  | Hole(q) when p == string_of_prov(q) => st
+  // | Hole(q) => Hole(q)
+  | Hole(Surface(u)) => Hole(Surface(u))
+  | Hole(Syn(u)) => Hole(Syn(u))
+  | Hole(LArrow(q)) =>
+    switch (solution_typ_replace_typ(p, Hole(q), st, m)) {
+    | EHole => EHole
+    | Num => EHole
+    | Hole(_) => Hole(LArrow(q)) //Hole(LArrow(q'))
+    | Arrow(_, _) => Hole(LArrow(q)) // t1
+    }
+  | Hole(RArrow(q)) =>
+    switch (solution_typ_replace_typ(p, Hole(q), st, m)) {
+    | EHole => EHole
+    | Num => EHole
+    | Hole(_) => Hole(RArrow(q)) //Hole(RArrow(q'))
+    | Arrow(_, _) => Hole(RArrow(q)) //t2
+    }
+  | EHole => EHole
+  | Num => Num
+  | Arrow(t1, t2) =>
+    Arrow(
+      solution_typ_replace_typ(p, t1, st, m),
+      solution_typ_replace_typ(p, t2, st, m),
+    )
+  };
+};
+
+let rec solution_replace_solution =
+        (p: string, s: solution, s': solution): solution => {
+  switch (s) {
+  | Hole(q) when p == string_of_prov(q) => s'
+  | Hole(_) => s
+  | Cyclic => s
+  | Multi(ss) =>
+    Multi(List.map(s => solution_replace_solution(p, s, s'), ss))
+  | EHole => s
+  | Num => Num
+  | Arrow(s1, s2) =>
+    Arrow(
+      solution_replace_solution(p, s1, s'),
+      solution_replace_solution(p, s2, s'),
+    )
+  };
+};
+
+let solution_typ_replace_con =
+    (p: string, Con(t1, t2): constramnot, st: Htyp.t, m: prov_map)
+    : constramnot => {
+  Con(
+    solution_typ_replace_typ(p, t1, st, m),
+    solution_typ_replace_typ(p, t2, st, m),
+  );
+};
+
+let solution_typ_replace_cons =
+    (p: string, cs: list(constramnot), st: Htyp.t, m: prov_map)
+    : list(constramnot) =>
+  List.map(c => solution_typ_replace_con(p, c, st, m), cs);
+
+let extend_sol_map =
+    (cs: list(constramnot), sm: sol_map)
+    : option((list(constramnot), sol_map)) => {
+  print_endline("Constraints:");
+  print_endline(string_of_constramnots(cs));
+  let canonical_cs = unfold_constramnots(cs); // make constraints canonical
+  let m = prov_map_of_constramnots(canonical_cs); // compute provenance map
+  print_endline("Provenance Map:");
+  print_endline(string_of_prov_map(m));
+  switch (find_dominant_provs(m)) {
+  // if you find a dominant provenance...
+  | [] => None
+  | [p, ..._] =>
+    Some(
+      {
+        print_endline("Solving: " ++ string_of_prov(p));
+        let s = solve_prov(p, m); // solve it
+        print_endline("Solution: " ++ string_of_solution(s));
+        let st = solution_typ(s); // turn it into a type
+        let ps: list(string) =
+          List.filter_map(
+            ((p', _)) =>
+              if (UnionFind.eq(lookup(p, m), StringMap.find(p', m))) {
+                Some
+                  (p');
+                  // let (canonical_p, _, _) = UnionFind.get(p_elem);
+                  // Some(canonical_p);
+              } else {
+                None;
+              },
+            StringMap.bindings(m),
+          );
+        print_endline("Equivalent provs: " ++ String.concat(",", ps));
+        let cs' =
+          List.fold_left(
+            (cs_acc, pss) => solution_typ_replace_cons(pss, cs_acc, st, m),
+            cs,
+            ps,
+          ); // replace it with the solution type in constraints
+        // let sm' = solution_typ_replace_sol_map(...)
+        let sm' =
+          List.fold_left(
+            (sm_acc, pss) => StringMap.add(pss, s, sm_acc),
+            sm,
+            ps,
+          ); // and extend the solution map
+        let sm'' =
+          List.fold_left(
+            (sm_acc, pss) =>
+              StringMap.map(
+                sol => solution_replace_solution(pss, sol, s),
+                sm_acc,
+              ),
+            sm',
+            ps,
+          ); // and replace it with the solution in the existing solutions
+        (cs', sm'');
+      },
+    )
+  };
+};
 
 let rec solve_rec = (cs: list(constramnot), sm: sol_map): sol_map => {
   switch (extend_sol_map(cs, sm)) {
@@ -372,12 +355,12 @@ let rec solve_rec = (cs: list(constramnot), sm: sol_map): sol_map => {
   };
 };
 
-let solve = (cs: list(constramnot)): sol_map =>
+let solve = (cs: list(constramnot)): sol_map => {
+  print_endline("SOLVING");
   solve_rec(cs, StringMap.empty);
+};
 
 let go = (cs: list(constramnot)): unit => {
-  print_endline("-----GO-----");
-  print_endline(string_of_constramnots(cs));
   let sm = solve(cs);
   print_endline(string_of_sol_map(sm));
   // let cs = unfold_constramnots(cs);
