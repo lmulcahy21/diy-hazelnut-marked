@@ -8,10 +8,10 @@ type canonical_constramnot =
 // postondition: returns an equivalent list of canonical (left side is hole) constriants
 let rec unfold_constramnot: constramnot => list(canonical_constramnot) =
   fun
-  | Con(Hole(p), t) => [Con(p, t)]
-  | Con(t, Hole(p)) => [Con(p, t)]
   | Con(EHole, _) => []
   | Con(_, EHole) => []
+  | Con(Hole(p), t) => [Con(p, t)]
+  | Con(t, Hole(p)) => [Con(p, t)]
   | Con(Num, Num) => []
   | Con(Arrow(t1, t2), Arrow(t3, t4)) =>
     unfold_constramnot(Con(t1, t3): constramnot)
@@ -189,28 +189,39 @@ let solution_typ = (p: Prov.t, s: solution): Htyp.t => {
 //   }
 // }
 
+// let rec subtype_of_provenance = (p: Prov.t, q : Prov.t, st : Htyp.t) : Htyp.t => {
+//   switch(q) {
+//     | Surface(u)
+//     | Syn(u) => if( p == q ) {st} else {Hole(q)}
+//     | LArrow(q) => switch(subtype_of_provenance(p, q, st)) {
+//       | EHole => EHole
+//       | Hole()
+//     }
+//   }
+// }
+
 let rec solution_typ_replace_typ =
         (p: Prov.t, t: Htyp.t, st: Htyp.t, m: prov_map): Htyp.t => {
   switch (t) {
   // | Hole(q) when UnionFind.eq(lookup(p, m), lookup(q, m)) => st
   | Hole(q) when p == q => st
-  | Hole(q) => Hole(q)
-  // | Hole(Surface(u)) => Hole(Surface(u))
-  // | Hole(Syn(u)) => Hole(Syn(u))
-  // | Hole(LArrow(q)) =>
-  //   switch (solution_typ_replace_typ(p, Hole(q), st, m)) {
-  //   | EHole => EHole
-  //   | Num => EHole
-  //   | Hole(q') => Hole(LArrow(q'))
-  //   | Arrow(t1, _) => t1
-  //   }
-  // | Hole(RArrow(q)) =>
-  //   switch (solution_typ_replace_typ(p, Hole(q), st, m)) {
-  //   | EHole => EHole
-  //   | Num => EHole
-  //   | Hole(q') => Hole(RArrow(q'))
-  //   | Arrow(_, t2) => t2
-  //   }
+  // | Hole(q) => Hole(q)
+  | Hole(Surface(u)) => Hole(Surface(u))
+  | Hole(Syn(u)) => Hole(Syn(u))
+  | Hole(LArrow(q)) =>
+    switch (solution_typ_replace_typ(p, Hole(q), st, m)) {
+    | EHole => EHole
+    | Num => EHole
+    | Hole(_) => Hole(LArrow(q)) //Hole(LArrow(q'))
+    | Arrow(_, _) => Hole(LArrow(q)) // t1
+    }
+  | Hole(RArrow(q)) =>
+    switch (solution_typ_replace_typ(p, Hole(q), st, m)) {
+    | EHole => EHole
+    | Num => EHole
+    | Hole(_) => Hole(LArrow(q)) //Hole(RArrow(q'))
+    | Arrow(_, _) => Hole(LArrow(q)) //t2
+    }
   | EHole => EHole
   | Num => Num
   | Arrow(t1, t2) =>
