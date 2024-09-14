@@ -107,29 +107,32 @@ let find_dominant_provs = (m: prov_map): list(Prov.t) => {
 };
 
 type solution =
-  | Hole
+  | EHole
+  | Hole(Prov.t)
   | Num
   | Arrow(solution, solution)
   | Multi(list(solution)) // Nums before arrows
   | Cyclic;
 
+let rec solution_of_typ: Htyp.t => solution =
+  fun
+  | EHole => EHole
+  | Hole(p) => Hole(p)
+  | Num => Num
+  | Arrow(t1, t2) => Arrow(solution_of_typ(t1), solution_of_typ(t2));
+
 let rec refine_solution = (s: solution, t: Htyp.t): solution => {
   switch (s, t) {
+  | (EHole, t) => solution_of_typ(t)
+  | (Hole(_), t) => solution_of_typ(t)
   | (s, Hole(_)) => s
   | (s, EHole) => s
-  | (Hole, Num) => Num
-  | (Hole, Arrow(t1, t2)) =>
-    Arrow(refine_solution(Hole, t1), refine_solution(Hole, t2))
   | (Num, Num) => Num
-  | (Num, Arrow(t1, t2)) =>
-    Multi([
-      Num,
-      Arrow(refine_solution(Hole, t1), refine_solution(Hole, t2)),
-    ])
+  | (Num, Arrow(_)) => Multi([Num, solution_of_typ(t)])
   | (Arrow(s1, s2), Num) => Multi([Num, Arrow(s1, s2)])
   | (Arrow(s1, s2), Arrow(t1, t2)) =>
     Arrow(refine_solution(s1, t1), refine_solution(s2, t2))
-  | (Multi(ss), t) => Multi(ss @ [refine_solution(Hole, t)]) // TODO: compress possibilities
+  | (Multi(ss), t) => Multi(ss @ [solution_of_typ(t)]) // TODO: compress possibilities
   // | (Multi([]), _)
   // | (Multi([Hole, ..._]), _)
   // | (Multi([Multi(_), ..._]), _)
@@ -150,30 +153,28 @@ let solve_prov = (p: Prov.t, m: prov_map): solution => {
     ++ "  constrained to "
     ++ String.concat(",", List.map(string_of_htyp, ts)),
   );
-  List.fold_left(refine_solution, Hole, ts);
+  List.fold_left(refine_solution, EHole, ts);
 };
 
-let rec solution_typ_rec = (p: Prov.t, s: solution): Htyp.t => {
+let rec typ_of_solution = (s: solution): Htyp.t => {
   switch (s) {
-  | Hole => Hole(p)
+  | EHole => EHole
+  | Hole(p) => Hole(p)
   | Num => Num
-  | Arrow(s1, s2) =>
-    Arrow(
-      solution_typ_rec(LArrow(p), s1),
-      solution_typ_rec(RArrow(p), s2),
-    )
+  | Arrow(s1, s2) => Arrow(typ_of_solution(s1), typ_of_solution(s2))
   | Multi(_) => EHole
   | Cyclic => EHole
   };
 };
 
-let solution_typ = (p: Prov.t, s: solution): Htyp.t => {
+let solution_typ = (s: solution): Htyp.t => {
   switch (s) {
-  | Hole => EHole
+  | EHole => EHole
+  | Hole(_) => EHole
   | Multi(_) => EHole
   | Cyclic => EHole
   | Num
-  | Arrow(_) => solution_typ_rec(p, s)
+  | Arrow(_) => typ_of_solution(s)
   };
 };
 
@@ -219,8 +220,8 @@ let rec solution_typ_replace_typ =
     switch (solution_typ_replace_typ(p, Hole(q), st, m)) {
     | EHole => EHole
     | Num => EHole
-    | Hole(_) => Hole(LArrow(q)) //Hole(RArrow(q'))
-    | Arrow(_, _) => Hole(LArrow(q)) //t2
+    | Hole(_) => Hole(RArrow(q)) //Hole(RArrow(q'))
+    | Arrow(_, _) => Hole(RArrow(q)) //t2
     }
   | EHole => EHole
   | Num => Num
@@ -228,6 +229,23 @@ let rec solution_typ_replace_typ =
     Arrow(
       solution_typ_replace_typ(p, t1, st, m),
       solution_typ_replace_typ(p, t2, st, m),
+    )
+  };
+};
+
+let rec solution_replace_solution =
+        (p: Prov.t, s: solution, s': solution): solution => {
+  switch (s) {
+  | Hole(q) when p == q => s'
+  | Hole(_) => s
+  | Cyclic => s
+  | Multi(_) => s
+  | EHole => s
+  | Num => Num
+  | Arrow(s1, s2) =>
+    Arrow(
+      solution_replace_solution(p, s1, s'),
+      solution_replace_solution(p, s2, s'),
     )
   };
 };
@@ -261,7 +279,7 @@ let extend_sol_map =
       {
         let s = solve_prov(p, m); // solve it
         print_endline("solved " ++ string_of_prov(p));
-        let st = solution_typ(p, s); // turn it into a type
+        let st = solution_typ(s); // turn it into a type
         let ps =
           List.filter_map(
             ((p', p_elem)) =>
@@ -285,8 +303,18 @@ let extend_sol_map =
             (sm_acc, pss) => StringMap.add(string_of_prov(pss), s, sm_acc),
             sm,
             ps,
-          ); // and update the solution map
-        (cs', sm');
+          ); // and extend the solution map
+        let sm'' =
+          List.fold_left(
+            (sm_acc, pss) =>
+              StringMap.map(
+                sol => solution_replace_solution(pss, sol, s),
+                sm_acc,
+              ),
+            sm',
+            ps,
+          ); // and replace it with the solution in the existing solutions
+        (cs', sm'');
       },
     )
   };
@@ -316,7 +344,8 @@ let string_of_prov_map = (m: prov_map): string => {
 
 let rec string_of_solution =
   fun
-  | Hole => "?"
+  | EHole => "?"
+  | Hole(p) => "?{" ++ string_of_prov(p) ++ "}"
   | Num => "Num"
   | Arrow(s1, s2) =>
     "(" ++ string_of_solution(s1) ++ "->" ++ string_of_solution(s2) ++ ")"
