@@ -107,7 +107,7 @@ type iaction =
 let apply_action = (e: Iexp.upper_exp, a: iaction): unit => {
   switch (a) {
   | WrapPlus =>
-    let parent = e.parent;
+    let parent = e.parent^;
     let e1 = e;
     let e2: Iexp.upper_exp = exp_hole_upper;
     let new_lower_left: Iexp.lower_exp = {
@@ -124,7 +124,7 @@ let apply_action = (e: Iexp.upper_exp, a: iaction): unit => {
     };
     let new_mid: Iexp.middle_exp = Plus(new_lower_left, new_lower_right);
     let new_upper: Iexp.upper_exp = {
-      parent,
+      parent: ref(parent),
       syn: Some({parent: ref(None), is_new: true, middle: Num}),
       middle: new_mid,
     };
@@ -132,7 +132,7 @@ let apply_action = (e: Iexp.upper_exp, a: iaction): unit => {
     new_lower_right.skip_up := new_upper;
     e1.parent := Some(new_lower_left);
     e2.parent := Some(new_lower_right);
-    switch (parent^) {
+    switch (parent) {
     | None => ()
     | Some(parent_lower) => parent_lower.child := new_upper
     };
