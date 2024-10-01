@@ -7,20 +7,20 @@ let compare_bool = Bool.compare;
 
 module Ityp = {
   [@deriving sexp]
-  type lower_typ = {
-    skip_up: ref(upper_typ),
-    child: ref(upper_typ),
+  type lower = {
+    skip_up: ref(upper),
+    child: ref(upper),
   }
 
-  and middle_typ =
-    | Arrow(lower_typ, lower_typ)
+  and middle =
+    | Arrow(lower, lower)
     | Num
     | Hole
 
-  and upper_typ = {
-    parent: ref(option(lower_typ)),
+  and upper = {
+    parent: ref(option(lower)),
     is_new: bool,
-    middle: middle_typ,
+    middle,
   };
   // type t =
   //   | Arrow(edge, edge)
@@ -41,26 +41,26 @@ type newness = bool;
 
 module Iexp = {
   [@deriving sexp]
-  type lower_exp = {
-    skip_up: ref(upper_exp),
-    ana: option(Ityp.upper_typ),
+  type lower = {
+    skip_up: ref(upper),
+    ana: option(Ityp.upper),
     marked: bool,
-    child: ref(upper_exp),
+    child: ref(upper),
   }
 
-  and middle_exp =
+  and middle =
     | Var(string, bool)
     | NumLit(int)
-    | Plus(lower_exp, lower_exp)
-    | Lam(string, Ityp.upper_typ, bool, lower_exp)
-    | Ap(lower_exp, bool, lower_exp)
-    | Asc(lower_exp, Ityp.upper_typ)
+    | Plus(lower, lower)
+    | Lam(string, Ityp.upper, bool, lower)
+    | Ap(lower, bool, lower)
+    | Asc(lower, Ityp.upper)
     | EHole
 
-  and upper_exp = {
-    parent: ref(option(lower_exp)),
-    syn: option(Ityp.upper_typ),
-    middle: middle_exp,
+  and upper = {
+    parent: ref(option(lower)),
+    syn: option(Ityp.upper),
+    middle,
   };
   // type t =
   //   | Var(string, bool)
@@ -83,15 +83,15 @@ module Iexp = {
 };
 
 type program =
-  | Root(Iexp.upper_exp);
+  | Root(Iexp.upper);
 
-let typ_hole_upper: Ityp.upper_typ = {
+let typ_hole_upper: Ityp.upper = {
   parent: ref(None),
   is_new: false,
   middle: Hole,
 };
 
-let exp_hole_upper: Iexp.upper_exp = {
+let exp_hole_upper: Iexp.upper = {
   parent: ref(None),
   syn: Some(typ_hole_upper),
   middle: EHole,
@@ -104,35 +104,48 @@ let dummy_upper_ref = ref(exp_hole_upper);
 type iaction =
   | WrapPlus;
 
-let apply_action = (e: Iexp.upper_exp, a: iaction): unit => {
+let apply_action = (e: Iexp.upper, a: iaction): unit => {
   switch (a) {
   | WrapPlus =>
-    let parent = e.parent^;
+    // The target of the action becomes the left child
     let e1 = e;
-    let e2: Iexp.upper_exp = exp_hole_upper;
-    let new_lower_left: Iexp.lower_exp = {
+    // An empty hole becomes the right child
+    let e2: Iexp.upper = exp_hole_upper;
+    // We need to save the parent of the target for later
+    let old_parent = e1.parent^;
+
+    // Create the new lower expressions with the correct children and new syn
+    // But we can't instantiate the skip-up pointers yet
+    let new_lower_left: Iexp.lower = {
       skip_up: dummy_upper_ref,
       ana: Some({parent: ref(None), is_new: true, middle: Num}),
       marked: false,
       child: ref(e1),
     };
-    let new_lower_right: Iexp.lower_exp = {
+    // In this case, we don't need to mark the syn of the hole as new, since
+    // We can take the shortcut of computing consistency (trivially true)
+    let new_lower_right: Iexp.lower = {
       skip_up: dummy_upper_ref,
       ana: Some({parent: ref(None), is_new: false, middle: Num}),
       marked: false,
       child: ref(e2),
     };
-    let new_mid: Iexp.middle_exp = Plus(new_lower_left, new_lower_right);
-    let new_upper: Iexp.upper_exp = {
-      parent: ref(parent),
+    // Continue to form the middle and upper expressions with the right
+    // "children" (not pointers to children), and using the remembered parent
+    let new_mid: Iexp.middle = Plus(new_lower_left, new_lower_right);
+    let new_upper: Iexp.upper = {
+      parent: ref(old_parent),
       syn: Some({parent: ref(None), is_new: true, middle: Num}),
       middle: new_mid,
     };
+
+    // Now the parents of the children and the child of the parent must be
+    // updated, as well as the skip-up pointers.
     new_lower_left.skip_up := new_upper;
     new_lower_right.skip_up := new_upper;
     e1.parent := Some(new_lower_left);
     e2.parent := Some(new_lower_right);
-    switch (parent) {
+    switch (old_parent) {
     | None => ()
     | Some(parent_lower) => parent_lower.child := new_upper
     };
