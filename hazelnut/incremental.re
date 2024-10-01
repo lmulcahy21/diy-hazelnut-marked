@@ -99,7 +99,7 @@ let exp_hole_upper: Iexp.upper_exp = {
 
 let initial_program: program = Root(exp_hole_upper);
 
-let dummy_upper = exp_hole_upper;
+let dummy_upper_ref = ref(exp_hole_upper);
 
 type iaction =
   | WrapPlus;
@@ -111,13 +111,13 @@ let apply_action = (e: Iexp.upper_exp, a: iaction): unit => {
     let e1 = e;
     let e2: Iexp.upper_exp = exp_hole_upper;
     let new_lower_left: Iexp.lower_exp = {
-      skip_up: ref(dummy_upper),
+      skip_up: dummy_upper_ref,
       ana: Some({parent: ref(None), is_new: true, middle: Num}),
       marked: false,
       child: ref(e1),
     };
     let new_lower_right: Iexp.lower_exp = {
-      skip_up: ref(dummy_upper),
+      skip_up: dummy_upper_ref,
       ana: Some({parent: ref(None), is_new: false, middle: Num}),
       marked: false,
       child: ref(e2),
