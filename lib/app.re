@@ -6,7 +6,7 @@ module Incremental = Hazelnut_lib.Incremental;
 
 module Pexp = {
   type t =
-    | Cursor(t)
+    // | Cursor(t)
     | Arrow(t, t)
     | Num
     | Var(string)
@@ -64,9 +64,9 @@ let rec pexp_of_hexp: Hazelnut.Hexp.t => Pexp.t =
 //   | Mark(e, m) => MarkHole(pexp_of_zexp(e), string_of_mark(m));
 
 // Lower is tighter
-let rec prec: Pexp.t => int =
+let prec: Pexp.t => int =
   fun
-  | Cursor(e) => prec(e)
+  // | Cursor(e) => prec(e)
   | Arrow(_) => 1
   | Num => 0
   | Var(_) => 0
@@ -85,9 +85,9 @@ module Side = {
     | Atom;
 };
 
-let rec assoc: Pexp.t => Side.t =
+let assoc: Pexp.t => Side.t =
   fun
-  | Cursor(e) => assoc(e)
+  // | Cursor(e) => assoc(e)
   | Arrow(_) => Right
   | Num => Atom
   | Var(_) => Atom
@@ -101,7 +101,7 @@ let rec assoc: Pexp.t => Side.t =
 
 let rec string_of_pexp: Pexp.t => string =
   fun
-  | Cursor(e) => "👉" ++ string_of_pexp(e) ++ "👈"
+  // | Cursor(e) => "👉" ++ string_of_pexp(e) ++ "👈"
   | Arrow(t1, t2) as outer =>
     paren(t1, outer, Side.Left) ++ " -> " ++ paren(t2, outer, Side.Right)
   | Num => "Num"
@@ -176,7 +176,7 @@ module Model = {
       lit_input: "",
       bool_input: "true | false",
     });
-  let cutoff = (t1: t, t2: t): bool => phys_equal(t1, t2);
+  let cutoff = (_: t, _: t): bool => false;
 };
 
 module Action = {
@@ -215,7 +215,7 @@ let apply_action =
       try(
         {
           state.e = Incremental.apply_action(state.e, action);
-          model;
+          Model.set(state);
         }
       ) {
       | Hazelnut.Unimplemented => warn("Unimplemented")
