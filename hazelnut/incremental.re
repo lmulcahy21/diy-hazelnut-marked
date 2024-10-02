@@ -1,4 +1,5 @@
 open Sexplib.Std;
+open Hazelnut;
 // open Monad_lib.Monad; // Uncomment this line to use the maybe monad
 
 let compare_string = String.compare;
@@ -23,6 +24,20 @@ module Ityp = {
     middle,
   };
 };
+
+let rec htyp_of_ityp: Ityp.upper => Htyp.t =
+  upper => htyp_of_ityp_middle(upper.middle)
+
+and htyp_of_ityp_middle: Ityp.middle => Htyp.t =
+  middle =>
+    switch (middle) {
+    | Arrow(t1, t2) =>
+      Arrow(htyp_of_ityp_lower(t1), htyp_of_ityp_lower(t2))
+    | Num => Num
+    | Hole => Hole
+    }
+and htyp_of_ityp_lower: Ityp.lower => Htyp.t =
+  lower => htyp_of_ityp(lower.child);
 
 [@deriving (sexp, compare)]
 type newness = bool;
@@ -52,10 +67,44 @@ module Iexp = {
   }
 
   and parent =
-    | Temp // just intermediate for setting
-    | Root({mutable child: upper})
-    | Lower(lower);
+    | Deleted // root of a subtree that has been deleted
+    | Root({mutable child: upper}) // root of the main program
+    | Lower(lower); // child location of a constuctor
 };
+
+let markif = (b: bool, m: Mark.t, exp: Hexp.t): Hexp.t =>
+  if (b) {
+    Mark(exp, m);
+  } else {
+    exp;
+  };
+
+let rec hexp_of_iexp: Iexp.upper => Hexp.t =
+  upper => hexp_of_iexp_middle(upper.middle)
+
+and hexp_of_iexp_middle: Iexp.middle => Hexp.t =
+  middle =>
+    switch (middle) {
+    | Var(x, m) => markif(m, Free, Var(x))
+    | NumLit(x) => NumLit(x)
+    | Plus(e1, e2) => Plus(hexp_of_iexp_lower(e1), hexp_of_iexp_lower(e2))
+    | Lam(x, t, m, e) =>
+      markif(
+        m,
+        LamAscIncon,
+        Lam(x, htyp_of_ityp(t), hexp_of_iexp_lower(e)),
+      )
+    | Ap(e1, m, e2) =>
+      markif(
+        m,
+        NonArrowAp,
+        Ap(hexp_of_iexp_lower(e1), hexp_of_iexp_lower(e2)),
+      )
+    | Asc(e, t) => Asc(hexp_of_iexp_lower(e), htyp_of_ityp(t))
+    | EHole => EHole
+    }
+and hexp_of_iexp_lower: Iexp.lower => Hexp.t =
+  lower => markif(lower.marked, Inconsistent, hexp_of_iexp(lower.child));
 
 let typ_hole_upper: bool => Ityp.upper =
   is_new => {parent: None, is_new, middle: Hole};
@@ -65,7 +114,7 @@ let typ_num_upper: bool => Ityp.upper =
 
 let exp_hole_upper: bool => Iexp.upper =
   is_new => {
-    parent: Temp,
+    parent: Deleted,
     syn: Some(typ_hole_upper(is_new)),
     middle: EHole,
   };
@@ -81,7 +130,7 @@ let freshen_typ = (t: option(Ityp.upper)): unit => {
 
 let freshen_ana_in_parent = (p: Iexp.parent): unit => {
   switch (p) {
-  | Temp
+  | Deleted
   | Root(_) => ()
   | Lower(r) => freshen_typ(r.ana)
   };
@@ -89,7 +138,7 @@ let freshen_ana_in_parent = (p: Iexp.parent): unit => {
 
 let set_child_in_parent = (p: Iexp.parent, c: Iexp.upper): unit => {
   switch (p) {
-  | Temp => ()
+  | Deleted => ()
   | Root(r) => r.child = c
   | Lower(r) => r.child = c
   };
@@ -101,7 +150,7 @@ type iaction =
   | WrapPlus1
   | WrapAp1;
 
-let apply_action = (e: Iexp.upper, a: iaction): unit => {
+let apply_action = (e: Iexp.upper, a: iaction): Iexp.upper => {
   switch (a) {
   | Delete =>
     let e': Iexp.upper = {
@@ -111,6 +160,8 @@ let apply_action = (e: Iexp.upper, a: iaction): unit => {
     };
     set_child_in_parent(e.parent, e');
     freshen_ana_in_parent(e.parent);
+    e.parent = Deleted;
+    e';
 
   | InsertNumLit(x) =>
     let e': Iexp.upper = {
@@ -120,16 +171,14 @@ let apply_action = (e: Iexp.upper, a: iaction): unit => {
     };
     set_child_in_parent(e.parent, e');
     freshen_ana_in_parent(e.parent);
+    e.parent = Deleted;
+    e';
 
   | WrapPlus1 =>
     // The target of the action becomes the left child
     let e1 = e;
     // An empty hole becomes the right child
-    let e2: Iexp.upper = {
-      parent: Temp,
-      syn: Some(typ_hole_upper(true)),
-      middle: EHole,
-    };
+    let e2: Iexp.upper = exp_hole_upper(false);
 
     // Create the new lower expressions with the correct children and new syn
     // But we can't instantiate the skip-up pointers yet
@@ -160,10 +209,10 @@ let apply_action = (e: Iexp.upper, a: iaction): unit => {
     // updated, as well as the skip-up pointers.
     new_lower_left.skip_up = new_upper;
     new_lower_right.skip_up = new_upper;
-    let old_parent = e1.parent;
+    set_child_in_parent(e1.parent, new_upper);
     e1.parent = Lower(new_lower_left);
     e2.parent = Lower(new_lower_right);
-    set_child_in_parent(old_parent, new_upper);
+    new_upper;
 
   | WrapAp1 =>
     let e1 = e;
@@ -193,5 +242,6 @@ let apply_action = (e: Iexp.upper, a: iaction): unit => {
     e1.parent = Lower(new_lower_left);
     e2.parent = Lower(new_lower_right);
     set_child_in_parent(old_parent, new_upper);
+    new_upper;
   };
 };
