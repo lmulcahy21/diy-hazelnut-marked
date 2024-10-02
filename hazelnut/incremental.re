@@ -8,8 +8,8 @@ let compare_bool = Bool.compare;
 module Ityp = {
   [@deriving sexp]
   type lower = {
-    skip_up: ref(upper),
-    child: ref(upper),
+    mutable skip_up: upper,
+    mutable child: upper,
   }
 
   and middle =
@@ -18,22 +18,10 @@ module Ityp = {
     | Hole
 
   and upper = {
-    parent: ref(option(lower)),
-    is_new: bool,
+    mutable parent: option(lower),
+    mutable is_new: bool,
     middle,
   };
-  // type t =
-  //   | Arrow(edge, edge)
-  //   | Num
-  //   | Hole
-  // and edge = {
-  //   is_new: bool,
-  //   exp: ref(t),
-  //   parent,
-  // }
-  // and parent =
-  //   | None
-  //   | Parent(ref(t));
 };
 
 [@deriving (sexp, compare)]
@@ -42,10 +30,10 @@ type newness = bool;
 module Iexp = {
   [@deriving sexp]
   type lower = {
-    skip_up: ref(upper),
+    mutable skip_up: upper,
     ana: option(Ityp.upper),
     marked: bool,
-    child: ref(upper),
+    mutable child: upper,
   }
 
   and middle =
@@ -58,96 +46,100 @@ module Iexp = {
     | EHole
 
   and upper = {
-    parent: ref(option(lower)),
+    mutable parent: option(lower),
     syn: option(Ityp.upper),
     middle,
   };
-  // type t =
-  //   | Var(string, bool)
-  //   | NumLit(int)
-  //   | Plus(edge, edge)
-  //   | Lam(string, Ityp.t, bool, edge)
-  //   | Ap(edge, bool, edge)
-  //   | Asc(edge, Ityp.t)
-  //   | EHole
-  // and edge = {
-  //   syn: etyp,
-  //   marked: bool,
-  //   ana: etyp,
-  //   t,
-  //   parent,
-  // }
-  // and parent =
-  //   | None
-  //   | Parent(ref(t), int);
 };
 
 type program =
-  | Root(Iexp.upper);
+  | Root(ref(Iexp.upper));
 
-let typ_hole_upper: Ityp.upper = {
-  parent: ref(None),
-  is_new: false,
-  middle: Hole,
-};
+let typ_hole_upper: bool => Ityp.upper =
+  is_new => {parent: None, is_new, middle: Hole};
 
-let exp_hole_upper: Iexp.upper = {
-  parent: ref(None),
-  syn: Some(typ_hole_upper),
-  middle: EHole,
-};
+let exp_hole_upper: bool => Iexp.upper =
+  is_new => {
+    parent: None,
+    syn: Some(typ_hole_upper(is_new)),
+    middle: EHole,
+  };
 
-let initial_program: program = Root(exp_hole_upper);
+let initial_program: program = Root(ref(exp_hole_upper(false)));
 
-let dummy_upper_ref = ref(exp_hole_upper);
+let dummy_upper = exp_hole_upper(false);
 
 type iaction =
+  | Delete
   | WrapPlus;
+
+let freshen_typ = (t: option(Ityp.upper)): unit => {
+  switch (t) {
+  | None => ()
+  | Some(upper) => upper.is_new = true
+  };
+};
+
+let freshen_ana_in_parent = (p: option(Iexp.lower)): unit => {
+  switch (p) {
+  | None => ()
+  | Some(lower) => freshen_typ(lower.ana)
+  };
+};
+
+let set_child_in_parent = (p: option(Iexp.lower), c: Iexp.upper): unit => {
+  switch (p) {
+  | None => ()
+  | Some(lower) => lower.child = c
+  };
+};
 
 let apply_action = (e: Iexp.upper, a: iaction): unit => {
   switch (a) {
+  | Delete =>
+    let e': Iexp.upper = exp_hole_upper(true);
+    set_child_in_parent(e.parent, e');
+    freshen_ana_in_parent(e.parent);
+
   | WrapPlus =>
     // The target of the action becomes the left child
     let e1 = e;
     // An empty hole becomes the right child
-    let e2: Iexp.upper = exp_hole_upper;
+    let e2: Iexp.upper = exp_hole_upper(false);
     // We need to save the parent of the target for later
-    let old_parent = e1.parent^;
+    let old_parent = e1.parent;
 
     // Create the new lower expressions with the correct children and new syn
     // But we can't instantiate the skip-up pointers yet
     let new_lower_left: Iexp.lower = {
-      skip_up: dummy_upper_ref,
-      ana: Some({parent: ref(None), is_new: true, middle: Num}),
+      skip_up: dummy_upper,
+      ana: Some({parent: None, is_new: true, middle: Num}),
       marked: false,
-      child: ref(e1),
+      child: e1,
     };
     // In this case, we don't need to mark the syn of the hole as new, since
     // We can take the shortcut of computing consistency (trivially true)
     let new_lower_right: Iexp.lower = {
-      skip_up: dummy_upper_ref,
-      ana: Some({parent: ref(None), is_new: false, middle: Num}),
+      skip_up: dummy_upper,
+      ana: Some({parent: None, is_new: false, middle: Num}),
       marked: false,
-      child: ref(e2),
+      child: e2,
     };
     // Continue to form the middle and upper expressions with the right
     // "children" (not pointers to children), and using the remembered parent
     let new_mid: Iexp.middle = Plus(new_lower_left, new_lower_right);
     let new_upper: Iexp.upper = {
-      parent: ref(old_parent),
-      syn: Some({parent: ref(None), is_new: true, middle: Num}),
+      parent: old_parent,
+      syn: Some({parent: None, is_new: true, middle: Num}),
       middle: new_mid,
     };
 
     // Now the parents of the children and the child of the parent must be
     // updated, as well as the skip-up pointers.
-    new_lower_left.skip_up := new_upper;
-    new_lower_right.skip_up := new_upper;
-    e1.parent := Some(new_lower_left);
-    e2.parent := Some(new_lower_right);
-    switch (old_parent) {
-    | None => ()
-    | Some(parent_lower) => parent_lower.child := new_upper
-    };
+    new_lower_left.skip_up = new_upper;
+    new_lower_right.skip_up = new_upper;
+    e1.parent = Some(new_lower_left);
+    e2.parent = Some(new_lower_right);
+    set_child_in_parent(old_parent, new_upper);
   };
 };
