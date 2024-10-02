@@ -58,6 +58,9 @@ type program =
 let typ_hole_upper: bool => Ityp.upper =
   is_new => {parent: None, is_new, middle: Hole};
 
+let typ_num_upper: bool => Ityp.upper =
+  is_new => {parent: None, is_new, middle: Num};
+
 let exp_hole_upper: bool => Iexp.upper =
   is_new => {
     parent: None,
@@ -71,7 +74,8 @@ let dummy_upper = exp_hole_upper(false);
 
 type iaction =
   | Delete
-  | WrapPlus;
+  | InsertNumLit(int)
+  | WrapPlus1;
 
 let freshen_typ = (t: option(Ityp.upper)): unit => {
   switch (t) {
@@ -98,10 +102,19 @@ let apply_action = (e: Iexp.upper, a: iaction): unit => {
   switch (a) {
   | Delete =>
     let e': Iexp.upper = exp_hole_upper(true);
+    e'.parent = e.parent;
     set_child_in_parent(e.parent, e');
     freshen_ana_in_parent(e.parent);
-
-  | WrapPlus =>
+  | InsertNumLit(x) =>
+    let e': Iexp.upper = {
+      parent: None,
+      syn: Some(typ_num_upper(true)),
+      middle: NumLit(x),
+    };
+    e'.parent = e.parent;
+    set_child_in_parent(e.parent, e');
+    freshen_ana_in_parent(e.parent);
+  | WrapPlus1 =>
     // The target of the action becomes the left child
     let e1 = e;
     // An empty hole becomes the right child
