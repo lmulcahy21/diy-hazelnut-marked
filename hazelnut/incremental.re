@@ -72,11 +72,6 @@ let initial_program: program = Root(ref(exp_hole_upper(false)));
 
 let dummy_upper = exp_hole_upper(false);
 
-type iaction =
-  | Delete
-  | InsertNumLit(int)
-  | WrapPlus1;
-
 let freshen_typ = (t: option(Ityp.upper)): unit => {
   switch (t) {
   | None => ()
@@ -98,6 +93,12 @@ let set_child_in_parent = (p: option(Iexp.lower), c: Iexp.upper): unit => {
   };
 };
 
+type iaction =
+  | Delete
+  | InsertNumLit(int)
+  | WrapPlus1
+  | WrapAp1;
+
 let apply_action = (e: Iexp.upper, a: iaction): unit => {
   switch (a) {
   | Delete =>
@@ -105,6 +106,7 @@ let apply_action = (e: Iexp.upper, a: iaction): unit => {
     e'.parent = e.parent;
     set_child_in_parent(e.parent, e');
     freshen_ana_in_parent(e.parent);
+
   | InsertNumLit(x) =>
     let e': Iexp.upper = {
       parent: None,
@@ -114,13 +116,12 @@ let apply_action = (e: Iexp.upper, a: iaction): unit => {
     e'.parent = e.parent;
     set_child_in_parent(e.parent, e');
     freshen_ana_in_parent(e.parent);
+
   | WrapPlus1 =>
     // The target of the action becomes the left child
     let e1 = e;
     // An empty hole becomes the right child
     let e2: Iexp.upper = exp_hole_upper(false);
-    // We need to save the parent of the target for later
-    let old_parent = e1.parent;
 
     // Create the new lower expressions with the correct children and new syn
     // But we can't instantiate the skip-up pointers yet
@@ -142,7 +143,7 @@ let apply_action = (e: Iexp.upper, a: iaction): unit => {
     // "children" (not pointers to children), and using the remembered parent
     let new_mid: Iexp.middle = Plus(new_lower_left, new_lower_right);
     let new_upper: Iexp.upper = {
-      parent: old_parent,
+      parent: e1.parent,
       syn: Some({parent: None, is_new: true, middle: Num}),
       middle: new_mid,
     };
@@ -151,6 +152,36 @@ let apply_action = (e: Iexp.upper, a: iaction): unit => {
     // updated, as well as the skip-up pointers.
     new_lower_left.skip_up = new_upper;
     new_lower_right.skip_up = new_upper;
+    let old_parent = e1.parent;
+    e1.parent = Some(new_lower_left);
+    e2.parent = Some(new_lower_right);
+    set_child_in_parent(old_parent, new_upper);
+
+  | WrapAp1 =>
+    let e1 = e;
+    freshen_typ(e1.syn); // TODO this will need to return a worker list
+    let e2 = exp_hole_upper(true);
+    let new_lower_left: Iexp.lower = {
+      skip_up: dummy_upper,
+      ana: None,
+      marked: false,
+      child: e1,
+    };
+    let new_lower_right: Iexp.lower = {
+      skip_up: dummy_upper,
+      ana: None,
+      marked: false,
+      child: e2,
+    };
+    let new_mid: Iexp.middle = Ap(new_lower_left, false, new_lower_right);
+    let new_upper: Iexp.upper = {
+      parent: e1.parent,
+      syn: None,
+      middle: new_mid,
+    };
+    new_lower_left.skip_up = new_upper;
+    new_lower_right.skip_up = new_upper;
+    let old_parent = e1.parent;
     e1.parent = Some(new_lower_left);
     e2.parent = Some(new_lower_right);
     set_child_in_parent(old_parent, new_upper);
