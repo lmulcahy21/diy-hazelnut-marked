@@ -2,10 +2,6 @@ open Sexplib.Std;
 open Hazelnut;
 // open Monad_lib.Monad; // Uncomment this line to use the maybe monad
 
-let compare_string = String.compare;
-let compare_int = Int.compare;
-let compare_bool = Bool.compare;
-
 module Ityp = {
   [@deriving sexp]
   type lower = {
@@ -38,9 +34,6 @@ and htyp_of_ityp_middle: Ityp.middle => Htyp.t =
     }
 and htyp_of_ityp_lower: Ityp.lower => Htyp.t =
   lower => htyp_of_ityp(lower.child);
-
-[@deriving (sexp, compare)]
-type newness = bool;
 
 module Iexp = {
   [@deriving sexp]
