@@ -46,14 +46,16 @@ module Iexp = {
     | EHole
 
   and upper = {
-    mutable parent: option(lower),
+    mutable parent,
     syn: option(Ityp.upper),
     middle,
-  };
-};
+  }
 
-type program =
-  | Root(ref(Iexp.upper));
+  and parent =
+    | Temp // just intermediate for setting
+    | Root({mutable child: upper})
+    | Lower(lower);
+};
 
 let typ_hole_upper: bool => Ityp.upper =
   is_new => {parent: None, is_new, middle: Hole};
@@ -63,12 +65,10 @@ let typ_num_upper: bool => Ityp.upper =
 
 let exp_hole_upper: bool => Iexp.upper =
   is_new => {
-    parent: None,
+    parent: Temp,
     syn: Some(typ_hole_upper(is_new)),
     middle: EHole,
   };
-
-let initial_program: program = Root(ref(exp_hole_upper(false)));
 
 let dummy_upper = exp_hole_upper(false);
 
@@ -79,17 +79,19 @@ let freshen_typ = (t: option(Ityp.upper)): unit => {
   };
 };
 
-let freshen_ana_in_parent = (p: option(Iexp.lower)): unit => {
+let freshen_ana_in_parent = (p: Iexp.parent): unit => {
   switch (p) {
-  | None => ()
-  | Some(lower) => freshen_typ(lower.ana)
+  | Temp
+  | Root(_) => ()
+  | Lower(r) => freshen_typ(r.ana)
   };
 };
 
-let set_child_in_parent = (p: option(Iexp.lower), c: Iexp.upper): unit => {
+let set_child_in_parent = (p: Iexp.parent, c: Iexp.upper): unit => {
   switch (p) {
-  | None => ()
-  | Some(lower) => lower.child = c
+  | Temp => ()
+  | Root(r) => r.child = c
+  | Lower(r) => r.child = c
   };
 };
 
@@ -102,18 +104,20 @@ type iaction =
 let apply_action = (e: Iexp.upper, a: iaction): unit => {
   switch (a) {
   | Delete =>
-    let e': Iexp.upper = exp_hole_upper(true);
-    e'.parent = e.parent;
+    let e': Iexp.upper = {
+      parent: e.parent,
+      syn: Some(typ_hole_upper(true)),
+      middle: EHole,
+    };
     set_child_in_parent(e.parent, e');
     freshen_ana_in_parent(e.parent);
 
   | InsertNumLit(x) =>
     let e': Iexp.upper = {
-      parent: None,
+      parent: e.parent,
       syn: Some(typ_num_upper(true)),
       middle: NumLit(x),
     };
-    e'.parent = e.parent;
     set_child_in_parent(e.parent, e');
     freshen_ana_in_parent(e.parent);
 
@@ -121,7 +125,11 @@ let apply_action = (e: Iexp.upper, a: iaction): unit => {
     // The target of the action becomes the left child
     let e1 = e;
     // An empty hole becomes the right child
-    let e2: Iexp.upper = exp_hole_upper(false);
+    let e2: Iexp.upper = {
+      parent: Temp,
+      syn: Some(typ_hole_upper(true)),
+      middle: EHole,
+    };
 
     // Create the new lower expressions with the correct children and new syn
     // But we can't instantiate the skip-up pointers yet
@@ -153,8 +161,8 @@ let apply_action = (e: Iexp.upper, a: iaction): unit => {
     new_lower_left.skip_up = new_upper;
     new_lower_right.skip_up = new_upper;
     let old_parent = e1.parent;
-    e1.parent = Some(new_lower_left);
-    e2.parent = Some(new_lower_right);
+    e1.parent = Lower(new_lower_left);
+    e2.parent = Lower(new_lower_right);
     set_child_in_parent(old_parent, new_upper);
 
   | WrapAp1 =>
@@ -182,8 +190,8 @@ let apply_action = (e: Iexp.upper, a: iaction): unit => {
     new_lower_left.skip_up = new_upper;
     new_lower_right.skip_up = new_upper;
     let old_parent = e1.parent;
-    e1.parent = Some(new_lower_left);
-    e2.parent = Some(new_lower_right);
+    e1.parent = Lower(new_lower_left);
+    e2.parent = Lower(new_lower_right);
     set_child_in_parent(old_parent, new_upper);
   };
 };
