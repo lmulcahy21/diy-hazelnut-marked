@@ -2,6 +2,7 @@ open Core;
 open Incr_dom;
 open Monad_lib.Monad;
 module Hazelnut = Hazelnut_lib.Hazelnut;
+module Incremental = Hazelnut_lib.Incremental;
 
 module Pexp = {
   type t =
@@ -43,24 +44,24 @@ let rec pexp_of_hexp: Hazelnut.Hexp.t => Pexp.t =
   | EHole => EHole
   | Mark(e, m) => MarkHole(pexp_of_hexp(e), string_of_mark(m));
 
-let rec pexp_of_ztyp: Hazelnut.Ztyp.t => Pexp.t =
-  fun
-  | Cursor(t) => Cursor(pexp_of_htyp(t))
-  | LArrow(t1, t2) => Arrow(pexp_of_ztyp(t1), pexp_of_htyp(t2))
-  | RArrow(t1, t2) => Arrow(pexp_of_htyp(t1), pexp_of_ztyp(t2));
+// let rec pexp_of_ztyp: Hazelnut.Ztyp.t => Pexp.t =
+//   fun
+//   | Cursor(t) => Cursor(pexp_of_htyp(t))
+//   | LArrow(t1, t2) => Arrow(pexp_of_ztyp(t1), pexp_of_htyp(t2))
+//   | RArrow(t1, t2) => Arrow(pexp_of_htyp(t1), pexp_of_ztyp(t2));
 
-let rec pexp_of_zexp: Hazelnut.Zexp.t => Pexp.t =
-  fun
-  | Cursor(e) => Cursor(pexp_of_hexp(e))
-  | LLam(x, a, e) => Lam(x, pexp_of_ztyp(a), pexp_of_hexp(e))
-  | RLam(x, a, e) => Lam(x, pexp_of_htyp(a), pexp_of_zexp(e))
-  | LAp(e1, e2) => Ap(pexp_of_zexp(e1), pexp_of_hexp(e2))
-  | RAp(e1, e2) => Ap(pexp_of_hexp(e1), pexp_of_zexp(e2))
-  | LPlus(e1, e2) => Plus(pexp_of_zexp(e1), pexp_of_hexp(e2))
-  | RPlus(e1, e2) => Plus(pexp_of_hexp(e1), pexp_of_zexp(e2))
-  | LAsc(e, t) => Asc(pexp_of_zexp(e), pexp_of_htyp(t))
-  | RAsc(e, t) => Asc(pexp_of_hexp(e), pexp_of_ztyp(t))
-  | Mark(e, m) => MarkHole(pexp_of_zexp(e), string_of_mark(m));
+// let rec pexp_of_zexp: Hazelnut.Zexp.t => Pexp.t =
+//   fun
+//   | Cursor(e) => Cursor(pexp_of_hexp(e))
+//   | LLam(x, a, e) => Lam(x, pexp_of_ztyp(a), pexp_of_hexp(e))
+//   | RLam(x, a, e) => Lam(x, pexp_of_htyp(a), pexp_of_zexp(e))
+//   | LAp(e1, e2) => Ap(pexp_of_zexp(e1), pexp_of_hexp(e2))
+//   | RAp(e1, e2) => Ap(pexp_of_hexp(e1), pexp_of_zexp(e2))
+//   | LPlus(e1, e2) => Plus(pexp_of_zexp(e1), pexp_of_hexp(e2))
+//   | RPlus(e1, e2) => Plus(pexp_of_hexp(e1), pexp_of_zexp(e2))
+//   | LAsc(e, t) => Asc(pexp_of_zexp(e), pexp_of_htyp(t))
+//   | RAsc(e, t) => Asc(pexp_of_hexp(e), pexp_of_ztyp(t))
+//   | Mark(e, m) => MarkHole(pexp_of_zexp(e), string_of_mark(m));
 
 // Lower is tighter
 let rec prec: Pexp.t => int =
@@ -144,9 +145,10 @@ and paren = (inner: Pexp.t, outer: Pexp.t, side: Side.t): string => {
   };
 };
 
-[@deriving (sexp, fields, compare)]
+[@deriving (sexp, fields)]
 type state = {
-  e: Hazelnut.Zexp.t,
+  p: Incremental.Iexp.parent,
+  mutable e: Incremental.Iexp.upper,
   // t: Hazelnut.Htyp.t,
   warning: option(string),
   var_input: string,
@@ -157,14 +159,15 @@ type state = {
 };
 
 module Model = {
-  [@deriving (sexp, fields, compare)]
+  [@deriving (sexp, fields)]
   type t = {state};
 
   let set = (s: state): t => {state: s};
 
   let init = (): t =>
     set({
-      e: Cursor(EHole),
+      p: Incremental.initial_program,
+      e: Incremental.initial_cursor,
       // t: Hole,
       warning: None,
       var_input: "",
@@ -173,8 +176,7 @@ module Model = {
       lit_input: "",
       bool_input: "true | false",
     });
-
-  let cutoff = (t1: t, t2: t): bool => compare(t1, t2) == 0;
+  let cutoff = (t1: t, t2: t): bool => phys_equal(t1, t2);
 };
 
 module Action = {
@@ -188,7 +190,7 @@ module Action = {
 
   [@deriving sexp]
   type action =
-    | HazelnutAction(Hazelnut.Action.t)
+    | HazelnutAction(Incremental.Iaction.t)
     | UpdateInput(input_location, string)
     | ShowWarning(string);
 
@@ -210,13 +212,12 @@ let apply_action =
 
     switch (action) {
     | HazelnutAction(action) =>
-      try({
-        let e = Hazelnut.exp_action(state.e, action);
-
-        let new_state = {...state, e, warning: None};
-
-        Model.set(new_state);
-      }) {
+      try(
+        {
+          state.e = Incremental.apply_action(state.e, action);
+          model;
+        }
+      ) {
       | Hazelnut.Unimplemented => warn("Unimplemented")
       }
     | UpdateInput(Var, var_input) => Model.set({...state, var_input})
@@ -242,19 +243,25 @@ let view =
   let%map body = {
     let%map state = m >>| Model.state;
 
-    let e_cursor = state.e;
+    // let e_cursor = state.e;
 
-    let e_no_cursor = Hazelnut.erase_exp(e_cursor);
+    // let e_no_cursor = Hazelnut.erase_exp(e_cursor);
 
-    let (e_marked, t) =
-      Hazelnut.mark_syn(Hazelnut.TypCtx.empty, e_no_cursor);
+    // let (e_marked, t) =
+    //   Hazelnut.mark_syn(Hazelnut.TypCtx.empty, e_no_cursor);
 
-    let e_folded = Hazelnut.fold_zexp_mexp(e_cursor, e_marked);
+    // let e_folded = Hazelnut.fold_zexp_mexp(e_cursor, e_marked);
+
+    let hexp =
+      switch (state.p) {
+      | Root(r) => Incremental.hexp_of_iexp(r.root_child)
+      | _ => failwith("impossible")
+      };
 
     let expression =
       Node.div([
-        Node.p([Node.textf("%s", string_of_pexp(pexp_of_zexp(e_folded)))]),
-        Node.p([Node.textf("%s", string_of_pexp(pexp_of_htyp(t)))]),
+        Node.p([Node.textf("%s", string_of_pexp(pexp_of_hexp(hexp)))]),
+        // Node.p([Node.textf("%s", string_of_pexp(pexp_of_htyp(t)))]),
       ]);
 
     let buttons = {
@@ -304,81 +311,73 @@ let view =
       };
 
       let move_buttons =
-        Node.div([
-          button(
-            "Move to Parent",
-            Action.HazelnutAction(Move(Parent)),
-            None,
-          ),
-          button(
-            "Move to Child 1",
-            Action.HazelnutAction(Move(Child(One))),
-            None,
-          ),
-          button(
-            "Move to Child 2",
-            Action.HazelnutAction(Move(Child(Two))),
-            None,
-          ),
-          button(
-            "Move to Child 3",
-            Action.HazelnutAction(Move(Child(Three))),
-            None,
-          ),
-        ]);
+        Node.div(
+          [] // button(
+          //   "Move to Parent",
+          //   Action.HazelnutAction(Move(Parent)),
+          //   None,
+          // ),
+          // button(
+          //   "Move to Child 1",
+          //   Action.HazelnutAction(Move(Child(One))),
+          //   None,
+          // ),
+          // button(
+          //   "Move to Child 2",
+          //   Action.HazelnutAction(Move(Child(Two))),
+          //   None,
+          // ),
+          // button(
+          //   "Move to Child 3",
+          //   Action.HazelnutAction(Move(Child(Three))),
+          //   None,
+          // ),
+        );
 
       let construct_buttons =
         Node.div([
-          button(
-            "Construct Arrow",
-            Action.HazelnutAction(Construct(Arrow)),
-            None,
-          ),
-          button(
-            "Construct Num",
-            Action.HazelnutAction(Construct(Num)),
-            None,
-          ),
-          button(
-            "Construct Asc",
-            Action.HazelnutAction(Construct(Asc)),
-            None,
-          ),
-          button(
-            "Construct Var",
-            Action.HazelnutAction(Construct(Var(state.var_input))),
-            Some((Var, state.var_input)),
-          ),
-          button(
-            "Construct Lam",
-            Action.HazelnutAction(Construct(Lam(state.lam_input))),
-            Some((Lam, state.lam_input)),
-          ),
-          button(
-            "Construct Ap",
-            Action.HazelnutAction(Construct(Ap)),
-            None,
-          ),
+          // button(
+          //   "Construct Arrow",
+          //   Action.HazelnutAction(Construct(Arrow)),
+          //   None,
+          // ),
+          // button(
+          //   "Construct Num",
+          //   Action.HazelnutAction(Construct(Num)),
+          //   None,
+          // ),
+          // button(
+          //   "Construct Asc",
+          //   Action.HazelnutAction(Construct(Asc)),
+          //   None,
+          // ),
+          // button(
+          //   "Construct Var",
+          //   Action.HazelnutAction(Construct(Var(state.var_input))),
+          //   Some((Var, state.var_input)),
+          // ),
+          // button(
+          //   "Construct Lam",
+          //   Action.HazelnutAction(Construct(Lam(state.lam_input))),
+          //   Some((Lam, state.lam_input)),
+          // ),
+          button("Wrap Ap 1", Action.HazelnutAction(WrapAp1), None),
           button(
             "Construct NumLit",
             try(
               Action.HazelnutAction(
-                Construct(NumLit(int_of_string(state.lit_input))),
+                InsertNumLit(int_of_string(state.lit_input)),
               )
             ) {
             | Failure(_) => Action.ShowWarning("Invalid input")
             },
             Some((NumLit, state.lit_input)),
           ),
-          button(
-            "Construct Plus",
-            Action.HazelnutAction(Construct(Plus)),
-            None,
-          ),
+          button("Wrap Plus 1", Action.HazelnutAction(WrapPlus1), None),
         ]);
 
       let delete_button =
-        Node.div([button("Delete", Action.HazelnutAction(Del), None)]);
+        Node.div([button("Delete", Action.HazelnutAction(Delete), None)]);
 
       Node.div([move_buttons, construct_buttons, delete_button]);
     };

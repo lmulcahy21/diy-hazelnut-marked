@@ -43,17 +43,24 @@ module Iexp: {
     middle,
   }
 
+  and child_ref = {mutable root_child: upper}
+
   and parent =
     | Deleted // root of a subtree that has been deleted
-    | Root({mutable child: upper}) // root of the main program
+    | Root(child_ref) // root of the main program
     | Lower(lower); // child location of a constuctor
 };
 
-type iaction =
-  | Delete
-  | InsertNumLit(int)
-  | WrapPlus1
-  | WrapAp1;
+module Iaction: {
+  [@deriving sexp]
+  type t =
+    | Delete
+    | InsertNumLit(int)
+    | WrapPlus1
+    | WrapAp1;
+};
 
+let initial_cursor: Iexp.upper;
+let initial_program: Iexp.parent;
 let hexp_of_iexp: Iexp.upper => Hexp.t;
-let apply_action: (Iexp.upper, iaction) => Iexp.upper;
+let apply_action: (Iexp.upper, Iaction.t) => Iexp.upper;

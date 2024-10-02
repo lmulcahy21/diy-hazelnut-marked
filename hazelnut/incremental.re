@@ -59,9 +59,11 @@ module Iexp = {
     middle,
   }
 
+  and child_ref = {mutable root_child: upper}
+
   and parent =
     | Deleted // root of a subtree that has been deleted
-    | Root({mutable child: upper}) // root of the main program
+    | Root(child_ref) // root of the main program
     | Lower(lower); // child location of a constuctor
 };
 
@@ -112,6 +114,13 @@ let exp_hole_upper: bool => Iexp.upper =
     middle: EHole,
   };
 
+let initial_cursor: Iexp.upper = exp_hole_upper(false);
+let initial_program: Iexp.parent = {
+  let r: Iexp.child_ref = {root_child: initial_cursor};
+  initial_cursor.parent = Root(r);
+  Root(r);
+};
+
 let dummy_upper = exp_hole_upper(false);
 
 let freshen_typ = (t: option(Ityp.upper)): unit => {
@@ -132,18 +141,21 @@ let freshen_ana_in_parent = (p: Iexp.parent): unit => {
 let set_child_in_parent = (p: Iexp.parent, c: Iexp.upper): unit => {
   switch (p) {
   | Deleted => ()
-  | Root(r) => r.child = c
+  | Root(r) => r.root_child = c
   | Lower(r) => r.child = c
   };
 };
 
-type iaction =
-  | Delete
-  | InsertNumLit(int)
-  | WrapPlus1
-  | WrapAp1;
+module Iaction = {
+  [@deriving sexp]
+  type t =
+    | Delete
+    | InsertNumLit(int)
+    | WrapPlus1
+    | WrapAp1;
+};
 
-let apply_action = (e: Iexp.upper, a: iaction): Iexp.upper => {
+let apply_action = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
   switch (a) {
   | Delete =>
     let e': Iexp.upper = {
