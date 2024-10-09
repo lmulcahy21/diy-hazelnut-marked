@@ -3,7 +3,7 @@ open Hazelnut;
 module Ityp: {
   [@deriving sexp]
   type lower = {
-    mutable skip_up: upper,
+    mutable upper,
     mutable child: upper,
   }
 
@@ -22,7 +22,7 @@ module Ityp: {
 module Iexp: {
   [@deriving sexp]
   type lower = {
-    mutable skip_up: upper,
+    mutable upper,
     ana: option(Ityp.upper),
     marked: bool,
     mutable child: upper,
@@ -51,9 +51,19 @@ module Iexp: {
     | Lower(lower); // child location of a constuctor
 };
 
+module Child: {
+  [@deriving (sexp, compare)]
+  type t =
+    | One
+    | Two
+    | Three;
+};
+
 module Iaction: {
   [@deriving sexp]
   type t =
+    | MoveUp
+    | MoveDown(Child.t)
     | Delete
     | InsertNumLit(int)
     | WrapPlus1

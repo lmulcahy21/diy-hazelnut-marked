@@ -3,6 +3,7 @@ open Sexplib.Std;
 
 let compare_string = String.compare;
 let compare_int = Int.compare;
+// let compare_bool = Bool.compare;
 
 module Htyp = {
   [@deriving (sexp, compare)]

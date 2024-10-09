@@ -176,6 +176,7 @@ module Model = {
       lit_input: "",
       bool_input: "true | false",
     });
+  // let cutoff = (t1: t, t2: t): bool => compare(t1, t2) == 0;
   let cutoff = (_: t, _: t): bool => false;
 };
 
@@ -311,28 +312,24 @@ let view =
       };
 
       let move_buttons =
-        Node.div(
-          [] // button(
-          //   "Move to Parent",
-          //   Action.HazelnutAction(Move(Parent)),
-          //   None,
-          // ),
-          // button(
-          //   "Move to Child 1",
-          //   Action.HazelnutAction(Move(Child(One))),
-          //   None,
-          // ),
-          // button(
-          //   "Move to Child 2",
-          //   Action.HazelnutAction(Move(Child(Two))),
-          //   None,
-          // ),
-          // button(
-          //   "Move to Child 3",
-          //   Action.HazelnutAction(Move(Child(Three))),
-          //   None,
-          // ),
-        );
+        Node.div([
+          button("Move to Parent", Action.HazelnutAction(MoveUp), None),
+          button(
+            "Move to Child 1",
+            Action.HazelnutAction(MoveDown(One)),
+            None,
+          ),
+          button(
+            "Move to Child 2",
+            Action.HazelnutAction(MoveDown(Two)),
+            None,
+          ),
+          button(
+            "Move to Child 3",
+            Action.HazelnutAction(MoveDown(Three)),
+            None,
+          ),
+        ]);
 
       let construct_buttons =
         Node.div([
