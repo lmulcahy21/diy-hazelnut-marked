@@ -169,8 +169,8 @@ module Iaction = {
     | MoveDown(Child.t)
     | Delete
     | InsertNumLit(int)
-    | WrapPlus1
-    | WrapAp1;
+    | WrapPlus(Child.t)
+    | WrapAp(Child.t);
 };
 
 let apply_action = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
@@ -180,36 +180,38 @@ let apply_action = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
     | None => e
     | Some(e') => e'
     }
-  | MoveDown(child_no) =>
+
+  | MoveDown(child) =>
     switch (e.middle) {
     | Var(_, _)
     | NumLit(_)
     | EHole => e
     | Plus(e1, e2) =>
-      switch (child_no) {
+      switch (child) {
       | One => e1.child
       | Two => e2.child
       | Three => e
       }
     | Lam(_, _, _, e1) =>
-      switch (child_no) {
+      switch (child) {
       | One => e1.child
       | Two
       | Three => e
       }
     | Ap(e1, _, e2) =>
-      switch (child_no) {
+      switch (child) {
       | One => e1.child
       | Two => e2.child
       | Three => e
       }
     | Asc(e1, _) =>
-      switch (child_no) {
+      switch (child) {
       | One => e1.child
       | Two
       | Three => e
       }
     }
+
   | Delete =>
     let e': Iexp.upper = {
       parent: e.parent,
@@ -232,74 +234,85 @@ let apply_action = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
     e.parent = Deleted;
     e';
 
-  | WrapPlus1 =>
-    // The target of the action becomes the left child
-    let e1 = e;
-    // An empty hole becomes the right child
-    let e2: Iexp.upper = exp_hole_upper(false);
+  | WrapPlus(child) =>
+    let make_plus_with_children = (e1, e2) => {
+      // Create the new lower expressions with the correct children and new syn
+      // But we can't instantiate the skip-up pointers yet
+      let new_lower_left: Iexp.lower = {
+        upper: dummy_upper,
+        ana: Some({parent: None, is_new: child == One, middle: Num}),
+        marked: false,
+        child: e1,
+      };
+      // In this case, we don't need to mark the syn of the hole as new, since
+      // We can take the shortcut of computing consistency (trivially true)
+      let new_lower_right: Iexp.lower = {
+        upper: dummy_upper,
+        ana: Some({parent: None, is_new: child == Two, middle: Num}),
+        marked: false,
+        child: e2,
+      };
+      // Continue to form the middle and upper expressions with the right
+      // "children" (not pointers to children), and using the remembered parent
+      let new_mid: Iexp.middle = Plus(new_lower_left, new_lower_right);
+      let new_upper: Iexp.upper = {
+        parent: e1.parent,
+        syn: Some({parent: None, is_new: true, middle: Num}),
+        middle: new_mid,
+      };
 
-    // Create the new lower expressions with the correct children and new syn
-    // But we can't instantiate the skip-up pointers yet
-    let new_lower_left: Iexp.lower = {
-      upper: dummy_upper,
-      ana: Some({parent: None, is_new: true, middle: Num}),
-      marked: false,
-      child: e1,
+      // Now the parents of the children and the child of the parent must be
+      // updated, as well as the skip-up pointers.
+      new_lower_left.upper = new_upper;
+      new_lower_right.upper = new_upper;
+      set_child_in_parent(e.parent, new_upper);
+      e1.parent = Lower(new_lower_left);
+      e2.parent = Lower(new_lower_right);
+      new_upper;
     };
-    // In this case, we don't need to mark the syn of the hole as new, since
-    // We can take the shortcut of computing consistency (trivially true)
-    let new_lower_right: Iexp.lower = {
-      upper: dummy_upper,
-      ana: Some({parent: None, is_new: false, middle: Num}),
-      marked: false,
-      child: e2,
-    };
-    // Continue to form the middle and upper expressions with the right
-    // "children" (not pointers to children), and using the remembered parent
-    let new_mid: Iexp.middle = Plus(new_lower_left, new_lower_right);
-    let new_upper: Iexp.upper = {
-      parent: e1.parent,
-      syn: Some({parent: None, is_new: true, middle: Num}),
-      middle: new_mid,
+    switch (child) {
+    | One => make_plus_with_children(e, exp_hole_upper(false))
+    | Two => make_plus_with_children(exp_hole_upper(false), e)
+    | Three => e
     };
 
-    // Now the parents of the children and the child of the parent must be
-    // updated, as well as the skip-up pointers.
-    new_lower_left.upper = new_upper;
-    new_lower_right.upper = new_upper;
-    set_child_in_parent(e1.parent, new_upper);
-    e1.parent = Lower(new_lower_left);
-    e2.parent = Lower(new_lower_right);
-    new_upper;
-
-  | WrapAp1 =>
-    let e1 = e;
-    freshen_typ(e1.syn); // TODO this will need to return a worker list
-    let e2 = exp_hole_upper(true);
-    let new_lower_left: Iexp.lower = {
-      upper: dummy_upper,
-      ana: None,
-      marked: false,
-      child: e1,
+  | WrapAp(child) =>
+    // child 1 = exp becomes fun
+    // child 2 = exp becomes arg
+    let make_ap_with_children = (e1, e2) => {
+      let new_lower_left: Iexp.lower = {
+        upper: dummy_upper,
+        ana: None,
+        marked: false,
+        child: e1,
+      };
+      let new_lower_right: Iexp.lower = {
+        upper: dummy_upper,
+        ana: None,
+        marked: false,
+        child: e2,
+      };
+      let new_mid: Iexp.middle = Ap(new_lower_left, false, new_lower_right);
+      let new_upper: Iexp.upper = {
+        parent: e1.parent,
+        syn: None,
+        middle: new_mid,
+      };
+      new_lower_left.upper = new_upper;
+      new_lower_right.upper = new_upper;
+      e1.parent = Lower(new_lower_left);
+      e2.parent = Lower(new_lower_right);
+      set_child_in_parent(e.parent, new_upper);
+      new_upper;
     };
-    let new_lower_right: Iexp.lower = {
-      upper: dummy_upper,
-      ana: None,
-      marked: false,
-      child: e2,
+    switch (child) {
+    | One =>
+      freshen_typ(e.syn); // TODO this will need to return a worker list
+      make_ap_with_children(e, exp_hole_upper(true));
+    | Two =>
+      freshen_typ(e.syn); // TODO this will need to return a worker list
+      make_ap_with_children(exp_hole_upper(true), e);
+    | Three => e
     };
-    let new_mid: Iexp.middle = Ap(new_lower_left, false, new_lower_right);
-    let new_upper: Iexp.upper = {
-      parent: e1.parent,
-      syn: None,
-      middle: new_mid,
-    };
-    new_lower_left.upper = new_upper;
-    new_lower_right.upper = new_upper;
-    let old_parent = e1.parent;
-    e1.parent = Lower(new_lower_left);
-    e2.parent = Lower(new_lower_right);
-    set_child_in_parent(old_parent, new_upper);
-    new_upper;
   };
 };
