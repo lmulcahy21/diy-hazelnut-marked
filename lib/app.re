@@ -5,6 +5,7 @@ module Hazelnut = Hazelnut_lib.Hazelnut;
 module Incremental = Hazelnut_lib.Incremental;
 
 module Pexp = {
+  [@deriving (sexp, compare)]
   type t =
     // | Cursor(t)
     | Arrow(t, t)
@@ -210,12 +211,34 @@ let apply_action =
 
     let warn = (warning: string): Model.t =>
       Model.set({...state, warning: Some(warning)});
-
+    assert(
+      switch (state.p) {
+      | Root(_) => true
+      | _ => false
+      },
+    );
     switch (action) {
     | HazelnutAction(action) =>
       try(
         {
+          print_endline("applying action");
           state.e = Incremental.apply_action(state.e, action);
+          print_endline(
+            "applied action, got exp: "
+            ++ string_of_pexp(
+                 pexp_of_hexp(Incremental.hexp_of_iexp(state.e)),
+               ),
+          );
+          switch (state.p) {
+          | Root(r) =>
+            print_endline(
+              "root: "
+              ++ string_of_pexp(
+                   pexp_of_hexp(Incremental.hexp_of_iexp(r.root_child)),
+                 ),
+            )
+          | _ => failwith("impossible")
+          };
           Model.set(state);
         }
       ) {
@@ -240,7 +263,6 @@ let view =
     : Ui_incr.t(Vdom.Node.t) => {
   open Incr.Let_syntax;
   open Vdom;
-
   let%map body = {
     let%map state = m >>| Model.state;
 
@@ -252,18 +274,20 @@ let view =
     //   Hazelnut.mark_syn(Hazelnut.TypCtx.empty, e_no_cursor);
 
     // let e_folded = Hazelnut.fold_zexp_mexp(e_cursor, e_marked);
-
-    let hexp =
+    let root_hexp =
       switch (state.p) {
       | Root(r) => Incremental.hexp_of_iexp(r.root_child)
       | _ => failwith("impossible")
       };
 
+    let root_string = string_of_pexp(pexp_of_hexp(root_hexp));
+
     let expression =
       Node.div([
-        Node.p([Node.textf("%s", string_of_pexp(pexp_of_hexp(hexp)))]),
+        Node.p([Node.textf("%s", root_string)]),
         // Node.p([Node.textf("%s", string_of_pexp(pexp_of_htyp(t)))]),
       ]);
+    print_endline("should see " ++ root_string);
 
     let buttons = {
       let button =
@@ -358,7 +382,16 @@ let view =
           //   Action.HazelnutAction(Construct(Lam(state.lam_input))),
           //   Some((Lam, state.lam_input)),
           // ),
-          button("Wrap Ap 1", Action.HazelnutAction(WrapAp1), None),
+          button(
+            "Construct Ap (Fun)",
+            Action.HazelnutAction(WrapAp(One)),
+            None,
+          ), // input needed here? or some cursor needed
+          button(
+            "Construct Ap (Arg)",
+            Action.HazelnutAction(WrapAp(Two)),
+            None,
+          ),
           button(
             "Construct NumLit",
             try(
@@ -370,7 +403,16 @@ let view =
             },
             Some((NumLit, state.lit_input)),
           ),
-          button("Wrap Plus 1", Action.HazelnutAction(WrapPlus1), None),
+          button(
+            "Construct Plus (Left)",
+            Action.HazelnutAction(WrapPlus(One)),
+            None,
+          ),
+          button(
+            "Construct Plus (Right)",
+            Action.HazelnutAction(WrapPlus(Two)),
+            None,
+          ),
         ]);
 
       let delete_button =

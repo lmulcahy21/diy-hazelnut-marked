@@ -66,8 +66,8 @@ module Iaction: {
     | MoveDown(Child.t)
     | Delete
     | InsertNumLit(int)
-    | WrapPlus1
-    | WrapAp1;
+    | WrapPlus(Child.t)
+    | WrapAp(Child.t);
 };
 
 let initial_cursor: Iexp.upper;

@@ -52,7 +52,6 @@ module Iexp = {
     | Ap(lower, bool, lower)
     | Asc(lower, Ityp.upper)
     | EHole
-
   and upper = {
     mutable parent,
     syn: option(Ityp.upper),
@@ -100,6 +99,12 @@ and hexp_of_iexp_middle: Iexp.middle => Hexp.t =
     }
 and hexp_of_iexp_lower: Iexp.lower => Hexp.t =
   lower => markif(lower.marked, Inconsistent, hexp_of_iexp(lower.child));
+
+let _print_iexp_upper: Iexp.upper => unit =
+  upper =>
+    print_endline(
+      "iexp print: " ++ string_of_sexp(Iexp.sexp_of_upper(upper)),
+    );
 
 let typ_hole_upper: bool => Ityp.upper =
   is_new => {parent: None, is_new, middle: Hole};
@@ -174,6 +179,7 @@ module Iaction = {
 };
 
 let apply_action = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
+  let e_parent = e.parent;
   switch (a) {
   | MoveUp =>
     switch (upper_of_parent(e.parent)) {
@@ -222,17 +228,21 @@ let apply_action = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
     freshen_ana_in_parent(e.parent);
     e.parent = Deleted;
     e';
-
   | InsertNumLit(x) =>
-    let e': Iexp.upper = {
-      parent: e.parent,
-      syn: Some(typ_num_upper(true)),
-      middle: NumLit(x),
-    };
-    set_child_in_parent(e.parent, e');
-    freshen_ana_in_parent(e.parent);
-    e.parent = Deleted;
-    e';
+    // Numlits have no lower Iexp, so we can just create a new upper for it to link to the NumLit middle
+    switch (e.middle) {
+    | EHole =>
+      let e': Iexp.upper = {
+        parent: e_parent,
+        syn: Some(typ_num_upper(true)),
+        middle: NumLit(x),
+      };
+      set_child_in_parent(e_parent, e');
+      freshen_ana_in_parent(e_parent);
+      e.parent = Deleted;
+      e';
+    | _ => e
+    }
 
   | WrapPlus(child) =>
     let make_plus_with_children = (e1, e2) => {
@@ -256,7 +266,7 @@ let apply_action = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
       // "children" (not pointers to children), and using the remembered parent
       let new_mid: Iexp.middle = Plus(new_lower_left, new_lower_right);
       let new_upper: Iexp.upper = {
-        parent: e1.parent,
+        parent: e_parent,
         syn: Some({parent: None, is_new: true, middle: Num}),
         middle: new_mid,
       };
@@ -265,9 +275,11 @@ let apply_action = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
       // updated, as well as the skip-up pointers.
       new_lower_left.upper = new_upper;
       new_lower_right.upper = new_upper;
-      set_child_in_parent(e.parent, new_upper);
+      set_child_in_parent(e_parent, new_upper);
       e1.parent = Lower(new_lower_left);
       e2.parent = Lower(new_lower_right);
+      set_child_in_parent(e1.parent, e1);
+      set_child_in_parent(e2.parent, e2);
       new_upper;
     };
     switch (child) {
@@ -294,15 +306,18 @@ let apply_action = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
       };
       let new_mid: Iexp.middle = Ap(new_lower_left, false, new_lower_right);
       let new_upper: Iexp.upper = {
-        parent: e1.parent,
+        parent: e_parent,
         syn: None,
         middle: new_mid,
       };
       new_lower_left.upper = new_upper;
       new_lower_right.upper = new_upper;
+      set_child_in_parent(e_parent, new_upper);
+      // Note that e1 or e2 is e, so modifying them modifies e
       e1.parent = Lower(new_lower_left);
       e2.parent = Lower(new_lower_right);
-      set_child_in_parent(e.parent, new_upper);
+      set_child_in_parent(e1.parent, e1);
+      set_child_in_parent(e2.parent, e2);
       new_upper;
     };
     switch (child) {
