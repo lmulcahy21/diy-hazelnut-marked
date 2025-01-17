@@ -149,7 +149,7 @@ and paren = (inner: Pexp.t, outer: Pexp.t, side: Side.t): string => {
 [@deriving (sexp, fields)]
 type state = {
   p: Incremental.Iexp.parent,
-  mutable e: Incremental.Iexp.upper,
+  e: Incremental.Iexp.upper,
   // t: Hazelnut.Htyp.t,
   warning: option(string),
   var_input: string,
@@ -221,25 +221,8 @@ let apply_action =
     | HazelnutAction(action) =>
       try(
         {
-          print_endline("applying action");
-          state.e = Incremental.apply_action(state.e, action);
-          print_endline(
-            "applied action, got exp: "
-            ++ string_of_pexp(
-                 pexp_of_hexp(Incremental.hexp_of_iexp(state.e)),
-               ),
-          );
-          switch (state.p) {
-          | Root(r) =>
-            print_endline(
-              "root: "
-              ++ string_of_pexp(
-                   pexp_of_hexp(Incremental.hexp_of_iexp(r.root_child)),
-                 ),
-            )
-          | _ => failwith("impossible")
-          };
-          Model.set(state);
+          let new_state_expr = Incremental.apply_action(state.e, action);
+          Model.set({...state, e: new_state_expr});
         }
       ) {
       | Hazelnut.Unimplemented => warn("Unimplemented")
