@@ -3,3 +3,4 @@ _build
 flake.lock
 flake.nix
 .envrc
+.vscode/
