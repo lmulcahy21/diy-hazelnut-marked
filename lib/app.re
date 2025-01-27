@@ -210,7 +210,10 @@ let apply_action =
     let state = model.state;
 
     let warn = (warning: string): Model.t =>
-      Model.set({...state, warning: Some(warning)});
+      Model.set({
+        ...state,
+        warning: Some(warning),
+      });
     assert(
       switch (state.p) {
       | Root(_) => true
@@ -219,20 +222,45 @@ let apply_action =
     );
     switch (action) {
     | HazelnutAction(action) =>
-      try(
-        {
-          let new_state_expr = Incremental.apply_action(state.e, action);
-          Model.set({...state, e: new_state_expr});
-        }
-      ) {
+      try({
+        let new_state_expr = Incremental.apply_action(state.e, action);
+        Model.set({
+          ...state,
+          e: new_state_expr,
+        });
+      }) {
       | Hazelnut.Unimplemented => warn("Unimplemented")
       }
-    | UpdateInput(Var, var_input) => Model.set({...state, var_input})
-    | UpdateInput(Lam, lam_input) => Model.set({...state, lam_input})
-    | UpdateInput(Let, let_input) => Model.set({...state, let_input})
-    | UpdateInput(NumLit, lit_input) => Model.set({...state, lit_input})
-    | UpdateInput(BoolLit, bool_input) => Model.set({...state, bool_input})
-    | ShowWarning(warning) => Model.set({...state, warning: Some(warning)})
+    | UpdateInput(Var, var_input) =>
+      Model.set({
+        ...state,
+        var_input,
+      })
+    | UpdateInput(Lam, lam_input) =>
+      Model.set({
+        ...state,
+        lam_input,
+      })
+    | UpdateInput(Let, let_input) =>
+      Model.set({
+        ...state,
+        let_input,
+      })
+    | UpdateInput(NumLit, lit_input) =>
+      Model.set({
+        ...state,
+        lit_input,
+      })
+    | UpdateInput(BoolLit, bool_input) =>
+      Model.set({
+        ...state,
+        bool_input,
+      })
+    | ShowWarning(warning) =>
+      Model.set({
+        ...state,
+        warning: Some(warning),
+      })
     };
   };
 

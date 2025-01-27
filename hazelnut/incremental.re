@@ -2,44 +2,45 @@ open Sexplib.Std;
 open Hazelnut;
 // open Monad_lib.Monad; // Uncomment this line to use the maybe monad
 
-module Ityp = {
-  [@deriving sexp]
-  type lower = {
-    mutable upper,
-    mutable child: upper,
-  }
+// To use structure sharing, we can't use mutable types
+// module Ityp = {
+//   [@deriving sexp]
+//   type lower = {
+//     mutable upper,
+//     mutable child: upper,
+//   }
 
-  and middle =
-    | Arrow(lower, lower)
-    | Num
-    | Hole
+//   and middle =
+//     | Arrow(lower, lower)
+//     | Num
+//     | Hole
 
-  and upper = {
-    mutable parent: option(lower),
-    mutable is_new: bool,
-    middle,
-  };
-};
+//   and upper = {
+//     mutable parent: option(lower),
+//     mutable is_new: bool,
+//     middle,
+//   };
+// };
 
-let rec htyp_of_ityp: Ityp.upper => Htyp.t =
-  upper => htyp_of_ityp_middle(upper.middle)
+// let rec htyp_of_ityp: Ityp.upper => Htyp.t =
+//   upper => htyp_of_ityp_middle(upper.middle)
 
-and htyp_of_ityp_middle: Ityp.middle => Htyp.t =
-  middle =>
-    switch (middle) {
-    | Arrow(t1, t2) =>
-      Arrow(htyp_of_ityp_lower(t1), htyp_of_ityp_lower(t2))
-    | Num => Num
-    | Hole => Hole
-    }
-and htyp_of_ityp_lower: Ityp.lower => Htyp.t =
-  lower => htyp_of_ityp(lower.child);
+// and htyp_of_ityp_middle: Ityp.middle => Htyp.t =
+//   middle =>
+//     switch (middle) {
+//     | Arrow(t1, t2) =>
+//       Arrow(htyp_of_ityp_lower(t1), htyp_of_ityp_lower(t2))
+//     | Num => Num
+//     | Hole => Hole
+//     }
+// and htyp_of_ityp_lower: Ityp.lower => Htyp.t =
+//   lower => htyp_of_ityp(lower.child);
 
 module Iexp = {
   [@deriving sexp]
   type lower = {
     mutable upper,
-    ana: option(Ityp.upper),
+    ana: option(Htyp.t),
     marked: bool,
     mutable child: upper,
   }
@@ -48,13 +49,14 @@ module Iexp = {
     | Var(string, bool)
     | NumLit(int)
     | Plus(lower, lower)
-    | Lam(string, Ityp.upper, bool, lower)
+    | Lam(string, Htyp.t, bool, lower)
     | Ap(lower, bool, lower)
-    | Asc(lower, Ityp.upper)
+    | Asc(lower, Htyp.t)
     | EHole
+
   and upper = {
     mutable parent,
-    syn: option(Ityp.upper),
+    syn: option(Htyp.t),
     middle,
   }
 
@@ -83,18 +85,14 @@ and hexp_of_iexp_middle: Iexp.middle => Hexp.t =
     | NumLit(x) => NumLit(x)
     | Plus(e1, e2) => Plus(hexp_of_iexp_lower(e1), hexp_of_iexp_lower(e2))
     | Lam(x, t, m, e) =>
-      markif(
-        m,
-        LamAscIncon,
-        Lam(x, htyp_of_ityp(t), hexp_of_iexp_lower(e)),
-      )
+      markif(m, LamAscIncon, Lam(x, t, hexp_of_iexp_lower(e)))
     | Ap(e1, m, e2) =>
       markif(
         m,
         NonArrowAp,
         Ap(hexp_of_iexp_lower(e1), hexp_of_iexp_lower(e2)),
       )
-    | Asc(e, t) => Asc(hexp_of_iexp_lower(e), htyp_of_ityp(t))
+    | Asc(e, t) => Asc(hexp_of_iexp_lower(e), t)
     | EHole => EHole
     }
 and hexp_of_iexp_lower: Iexp.lower => Hexp.t =
@@ -106,42 +104,49 @@ let _print_iexp_upper: Iexp.upper => unit =
       "iexp print: " ++ string_of_sexp(Iexp.sexp_of_upper(upper)),
     );
 
-let typ_hole_upper: bool => Ityp.upper =
-  is_new => {parent: None, is_new, middle: Hole};
+// let typ_hole_upper: bool => Ityp.upper =
+//   is_new => {
+//     parent: None,
+//     is_new,
+//     middle: Hole,
+//   };
 
-let typ_num_upper: bool => Ityp.upper =
-  is_new => {parent: None, is_new, middle: Num};
+// let typ_num_upper: bool => Ityp.upper =
+//   is_new => {
+//     parent: None,
+//     is_new,
+//     middle: Num,
+//   };
 
-let exp_hole_upper: bool => Iexp.upper =
-  is_new => {
-    parent: Deleted,
-    syn: Some(typ_hole_upper(is_new)),
-    middle: EHole,
-  };
+let exp_hole_upper: Iexp.upper = {
+  parent: Deleted,
+  syn: Some(Hole),
+  middle: EHole,
+};
 
-let initial_cursor: Iexp.upper = exp_hole_upper(false);
+let initial_cursor: Iexp.upper = exp_hole_upper;
 let initial_program: Iexp.parent = {
   let r: Iexp.child_ref = {root_child: initial_cursor};
   initial_cursor.parent = Root(r);
   Root(r);
 };
 
-let dummy_upper = exp_hole_upper(false);
+let dummy_upper = exp_hole_upper;
 
-let freshen_typ = (t: option(Ityp.upper)): unit => {
-  switch (t) {
-  | None => ()
-  | Some(upper) => upper.is_new = true
-  };
-};
+// let freshen_typ = (t: option(Ityp.upper)): unit => {
+//   switch (t) {
+//   | None => ()
+//   | Some(upper) => upper.is_new = true
+//   };
+// };
 
-let freshen_ana_in_parent = (p: Iexp.parent): unit => {
-  switch (p) {
-  | Deleted
-  | Root(_) => ()
-  | Lower(r) => freshen_typ(r.ana)
-  };
-};
+// let freshen_ana_in_parent = (p: Iexp.parent): unit => {
+//   switch (p) {
+//   | Deleted
+//   | Root(_) => ()
+//   | Lower(r) => freshen_typ(r.ana)
+//   };
+// };
 
 let set_child_in_parent = (p: Iexp.parent, c: Iexp.upper): unit => {
   switch (p) {
@@ -221,11 +226,11 @@ let apply_action = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
   | Delete =>
     let e': Iexp.upper = {
       parent: e.parent,
-      syn: Some(typ_hole_upper(true)),
+      syn: Some(Hole),
       middle: EHole,
     };
     set_child_in_parent(e.parent, e');
-    freshen_ana_in_parent(e.parent);
+    // freshen_ana_in_parent(e.parent);
     e.parent = Deleted;
     e';
   | InsertNumLit(x) =>
@@ -234,11 +239,11 @@ let apply_action = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
     | EHole =>
       let e': Iexp.upper = {
         parent: e_parent,
-        syn: Some(typ_num_upper(true)),
+        syn: Some(Num),
         middle: NumLit(x),
       };
       set_child_in_parent(e_parent, e');
-      freshen_ana_in_parent(e_parent);
+      // freshen_ana_in_parent(e_parent);
       e.parent = Deleted;
       e';
     | _ => e
@@ -250,7 +255,7 @@ let apply_action = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
       // But we can't instantiate the skip-up pointers yet
       let new_lower_left: Iexp.lower = {
         upper: dummy_upper,
-        ana: Some({parent: None, is_new: child == One, middle: Num}),
+        ana: Some(Num),
         marked: false,
         child: e1,
       };
@@ -258,7 +263,7 @@ let apply_action = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
       // We can take the shortcut of computing consistency (trivially true)
       let new_lower_right: Iexp.lower = {
         upper: dummy_upper,
-        ana: Some({parent: None, is_new: child == Two, middle: Num}),
+        ana: Some(Num),
         marked: false,
         child: e2,
       };
@@ -267,7 +272,7 @@ let apply_action = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
       let new_mid: Iexp.middle = Plus(new_lower_left, new_lower_right);
       let new_upper: Iexp.upper = {
         parent: e_parent,
-        syn: Some({parent: None, is_new: true, middle: Num}),
+        syn: Some(Num),
         middle: new_mid,
       };
 
@@ -283,8 +288,8 @@ let apply_action = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
       new_upper;
     };
     switch (child) {
-    | One => make_plus_with_children(e, exp_hole_upper(false))
-    | Two => make_plus_with_children(exp_hole_upper(false), e)
+    | One => make_plus_with_children(e, exp_hole_upper)
+    | Two => make_plus_with_children(exp_hole_upper, e)
     | Three => e
     };
 
@@ -322,11 +327,11 @@ let apply_action = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
     };
     switch (child) {
     | One =>
-      freshen_typ(e.syn); // TODO this will need to return a worker list
-      make_ap_with_children(e, exp_hole_upper(true));
+      // freshen_typ(e.syn); // TODO this will need to return a worker list
+      make_ap_with_children(e, exp_hole_upper)
     | Two =>
-      freshen_typ(e.syn); // TODO this will need to return a worker list
-      make_ap_with_children(exp_hole_upper(true), e);
+      // freshen_typ(e.syn); // TODO this will need to return a worker list
+      make_ap_with_children(exp_hole_upper, e)
     | Three => e
     };
   };

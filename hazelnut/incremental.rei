@@ -1,29 +1,29 @@
 open Hazelnut;
 
-module Ityp: {
-  [@deriving sexp]
-  type lower = {
-    mutable upper,
-    mutable child: upper,
-  }
+// module Ityp: {
+//   [@deriving sexp]
+//   type lower = {
+//     mutable upper,
+//     mutable child: upper,
+//   }
 
-  and middle =
-    | Arrow(lower, lower)
-    | Num
-    | Hole
+//   and middle =
+//     | Arrow(lower, lower)
+//     | Num
+//     | Hole
 
-  and upper = {
-    mutable parent: option(lower),
-    mutable is_new: bool,
-    middle,
-  };
-};
+//   and upper = {
+//     mutable parent: option(lower),
+//     mutable is_new: bool,
+//     middle,
+//   };
+// };
 
 module Iexp: {
   [@deriving sexp]
   type lower = {
     mutable upper,
-    ana: option(Ityp.upper),
+    ana: option(Htyp.t),
     marked: bool,
     mutable child: upper,
   }
@@ -32,14 +32,14 @@ module Iexp: {
     | Var(string, bool)
     | NumLit(int)
     | Plus(lower, lower)
-    | Lam(string, Ityp.upper, bool, lower)
+    | Lam(string, Htyp.t, bool, lower)
     | Ap(lower, bool, lower)
-    | Asc(lower, Ityp.upper)
+    | Asc(lower, Htyp.t)
     | EHole
 
   and upper = {
     mutable parent,
-    syn: option(Ityp.upper),
+    syn: option(Htyp.t),
     middle,
   }
 
