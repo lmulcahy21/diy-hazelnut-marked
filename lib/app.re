@@ -124,9 +124,9 @@ let rec string_of_pexp: Pexp.t => string =
   fun
   | Cursor(e) => "👉" ++ string_of_pexp(e) ++ "👈"
   | NewSyn(e, t) as outer =>
-    paren(e, outer, Side.Left) ++ "=> " ++ paren(t, outer, Side.Right) ++ "*"
+    paren(e, outer, Side.Left) ++ "⇒" ++ paren(t, outer, Side.Right) ++ "*"
   | NewAna(e, t) as outer =>
-    paren(e, outer, Side.Left) ++ "<= " ++ paren(t, outer, Side.Right) ++ "*"
+    paren(e, outer, Side.Left) ++ "⇐" ++ paren(t, outer, Side.Right) ++ "*"
   | Arrow(t1, t2) as outer =>
     paren(t1, outer, Side.Left) ++ " -> " ++ paren(t2, outer, Side.Right)
   | Num => "Num"
@@ -136,9 +136,9 @@ let rec string_of_pexp: Pexp.t => string =
     ++ x
     ++ ": "
     ++ string_of_pexp(a)
-    ++ " -> {"
+    ++ " -> ("
     ++ string_of_pexp(e)
-    ++ "}"
+    ++ ")"
 
   | Ap(e1, e2) as outer =>
     paren(e1, outer, Side.Left) ++ " " ++ paren(e2, outer, Side.Right)
@@ -147,8 +147,8 @@ let rec string_of_pexp: Pexp.t => string =
     paren(e1, outer, Side.Left) ++ " + " ++ paren(e2, outer, Side.Right)
   | Asc(e, t) as outer =>
     paren(e, outer, Side.Left) ++ ": " ++ paren(t, outer, Side.Right)
-  | EHole => "[ ]"
-  | MarkHole(e, m) => "[ " ++ string_of_pexp(e) ++ "| " ++ m ++ "| ]"
+  | EHole => "?"
+  | MarkHole(e, m) => "{ " ++ string_of_pexp(e) ++ "| " ++ m ++ "}"
 
 and paren = (inner: Pexp.t, outer: Pexp.t, side: Side.t): string => {
   let unparenned = string_of_pexp(inner);
@@ -311,8 +311,7 @@ let view =
     // let e_folded = Hazelnut.fold_zexp_mexp(e_cursor, e_marked);
     let root_display_exp =
       switch (state.root) {
-      | Root(r) =>
-        Incremental.display_of_iexp(r.root_child, fst(state.istate))
+      | Root(r) => Incremental.display_of_iexp(r.root_child, state.istate)
       | _ => failwith("impossible")
       };
 

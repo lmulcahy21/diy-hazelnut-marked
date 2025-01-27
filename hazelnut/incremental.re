@@ -123,51 +123,76 @@ let display_markif = (b: bool, m: Mark.t, exp: DisplayExp.t): DisplayExp.t =>
   };
 
 let rec display_of_iexp =
-        (e: Iexp.upper, cursor: Iexp.upper, updates: UpdateQueue.t)
-        : DisplayExp.t =>
-  if (e === cursor) {
-    Cursor(display_of_iexp_middle(e.middle, cursor, updates));
-  } else {
-    display_of_iexp_middle(e.middle, cursor, updates);
-  }
+        (e: Iexp.upper, (cursor, updates): Istate.t): DisplayExp.t => {
+  let d = display_of_iexp_middle(e.middle, (cursor, updates));
+  let d: DisplayExp.t =
+    if (e === cursor) {
+      Cursor(d);
+    } else {
+      d;
+    };
+  let filter_updates = (u: Update.t) => {
+    switch (u) {
+    | NewSyn(e') when e === e' => e.syn
+    | NewSyn(_) => None
+    | NewAna(_) => None
+    };
+  };
+  switch (List.filter_map(filter_updates, updates)) {
+  | [t, ..._] => NewSyn(d, t)
+  | [] => d
+  };
+}
 
 and display_of_iexp_middle =
-    (e: Iexp.middle, cursor: Iexp.upper, updates: UpdateQueue.t): DisplayExp.t => {
+    (e: Iexp.middle, (cursor, updates): Istate.t): DisplayExp.t => {
   switch (e) {
   | Var(x, m) => display_markif(m, Free, Var(x))
   | NumLit(x) => NumLit(x)
   | Plus(e1, e2) =>
     Plus(
-      display_of_iexp_lower(e1, cursor, updates),
-      display_of_iexp_lower(e2, cursor, updates),
+      display_of_iexp_lower(e1, (cursor, updates)),
+      display_of_iexp_lower(e2, (cursor, updates)),
     )
   | Lam(x, t, m, e) =>
     display_markif(
       m,
       LamAscIncon,
-      Lam(x, t, display_of_iexp_lower(e, cursor, updates)),
+      Lam(x, t, display_of_iexp_lower(e, (cursor, updates))),
     )
   | Ap(e1, m, e2) =>
     display_markif(
       m,
       NonArrowAp,
       Ap(
-        display_of_iexp_lower(e1, cursor, updates),
-        display_of_iexp_lower(e2, cursor, updates),
+        display_of_iexp_lower(e1, (cursor, updates)),
+        display_of_iexp_lower(e2, (cursor, updates)),
       ),
     )
-  | Asc(e, t) => Asc(display_of_iexp_lower(e, cursor, updates), t)
+  | Asc(e, t) => Asc(display_of_iexp_lower(e, (cursor, updates)), t)
   | EHole => EHole
   };
 }
 
 and display_of_iexp_lower =
-    (e: Iexp.lower, cursor: Iexp.upper, updates: UpdateQueue.t): DisplayExp.t => {
-  display_markif(
-    e.marked,
-    Inconsistent,
-    display_of_iexp(e.child, cursor, updates),
-  );
+    (e: Iexp.lower, (cursor, updates): Istate.t): DisplayExp.t => {
+  let d =
+    display_markif(
+      e.marked,
+      Inconsistent,
+      display_of_iexp(e.child, (cursor, updates)),
+    );
+  let filter_updates = (u: Update.t) => {
+    switch (u) {
+    | NewAna(e') when e === e' => e.ana
+    | NewAna(_) => None
+    | NewSyn(_) => None
+    };
+  };
+  switch (List.filter_map(filter_updates, updates)) {
+  | [t, ..._] => NewAna(d, t)
+  | [] => d
+  };
 };
 
 let _print_iexp_upper: Iexp.upper => unit =
@@ -308,7 +333,7 @@ let apply_action = ((e, q): Istate.t, a: Iaction.t): Istate.t => {
     set_child_in_parent(e.parent, e');
     // freshen_ana_in_parent(e.parent);
     e.parent = Deleted;
-    (e', [NewSyn(e'), ...q]);
+    (e', [Update.NewSyn(e')] @ q);
   | InsertNumLit(x) =>
     // Numlits have no lower Iexp, so we can just create a new upper for it to link to the NumLit middle
     switch (e.middle) {
@@ -361,11 +386,19 @@ let apply_action = ((e, q): Istate.t, a: Iaction.t): Istate.t => {
       e2.parent = Lower(new_lower_right);
       set_child_in_parent(e1.parent, e1);
       set_child_in_parent(e2.parent, e2);
-      new_upper;
+      (
+        new_upper,
+        [
+          Update.NewAna(new_lower_left),
+          Update.NewAna(new_lower_right),
+          Update.NewSyn(new_upper),
+        ]
+        @ q,
+      );
     };
     switch (child) {
-    | One => (make_plus_with_children(e, exp_hole_upper()), q)
-    | Two => (make_plus_with_children(exp_hole_upper(), e), q)
+    | One => make_plus_with_children(e, exp_hole_upper())
+    | Two => make_plus_with_children(exp_hole_upper(), e)
     | Three => (e, q)
     };
 

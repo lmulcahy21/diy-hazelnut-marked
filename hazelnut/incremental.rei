@@ -90,5 +90,5 @@ module Istate: {
 let initial_root: Iexp.parent;
 let initial_state: Istate.t;
 let hexp_of_iexp: Iexp.upper => Hexp.t;
-let display_of_iexp: (Iexp.upper, Iexp.upper) => DisplayExp.t;
+let display_of_iexp: (Iexp.upper, Istate.t) => DisplayExp.t;
 let apply_action: (Istate.t, Iaction.t) => Istate.t;
