@@ -195,43 +195,44 @@ module Iaction = {
     | WrapAp(Child.t);
 };
 
-let apply_action_exp = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
+// TODO: update queue
+let apply_action = ((e, q): Istate.t, a: Iaction.t): Istate.t => {
   let e_parent = e.parent;
   switch (a) {
   | MoveUp =>
     switch (upper_of_parent(e.parent)) {
-    | None => e
-    | Some(e') => e'
+    | None => (e, q)
+    | Some(e') => (e', q)
     }
 
   | MoveDown(child) =>
     switch (e.middle) {
     | Var(_, _)
     | NumLit(_)
-    | EHole => e
+    | EHole => (e, q)
     | Plus(e1, e2) =>
       switch (child) {
-      | One => e1.child
-      | Two => e2.child
-      | Three => e
+      | One => (e1.child, q)
+      | Two => (e2.child, q)
+      | Three => (e, q)
       }
     | Lam(_, _, _, e1) =>
       switch (child) {
-      | One => e1.child
+      | One => (e1.child, q)
       | Two
-      | Three => e
+      | Three => (e, q)
       }
     | Ap(e1, _, e2) =>
       switch (child) {
-      | One => e1.child
-      | Two => e2.child
-      | Three => e
+      | One => (e1.child, q)
+      | Two => (e2.child, q)
+      | Three => (e, q)
       }
     | Asc(e1, _) =>
       switch (child) {
-      | One => e1.child
+      | One => (e1.child, q)
       | Two
-      | Three => e
+      | Three => (e, q)
       }
     }
 
@@ -244,7 +245,7 @@ let apply_action_exp = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
     set_child_in_parent(e.parent, e');
     // freshen_ana_in_parent(e.parent);
     e.parent = Deleted;
-    e';
+    (e', q);
   | InsertNumLit(x) =>
     // Numlits have no lower Iexp, so we can just create a new upper for it to link to the NumLit middle
     switch (e.middle) {
@@ -257,8 +258,8 @@ let apply_action_exp = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
       set_child_in_parent(e_parent, e');
       // freshen_ana_in_parent(e_parent);
       e.parent = Deleted;
-      e';
-    | _ => e
+      (e', q);
+    | _ => (e, q)
     }
 
   | WrapPlus(child) =>
@@ -300,9 +301,9 @@ let apply_action_exp = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
       new_upper;
     };
     switch (child) {
-    | One => make_plus_with_children(e, exp_hole_upper)
-    | Two => make_plus_with_children(exp_hole_upper, e)
-    | Three => e
+    | One => (make_plus_with_children(e, exp_hole_upper), q)
+    | Two => (make_plus_with_children(exp_hole_upper, e), q)
+    | Three => (e, q)
     };
 
   | WrapAp(child) =>
@@ -340,18 +341,11 @@ let apply_action_exp = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
     switch (child) {
     | One =>
       // freshen_typ(e.syn); // TODO this will need to return a worker list
-      make_ap_with_children(e, exp_hole_upper)
+      (make_ap_with_children(e, exp_hole_upper), q)
     | Two =>
       // freshen_typ(e.syn); // TODO this will need to return a worker list
-      make_ap_with_children(exp_hole_upper, e)
-    | Three => e
+      (make_ap_with_children(exp_hole_upper, e), q)
+    | Three => (e, q)
     };
   };
-};
-
-// TODO
-let apply_action = (s: Istate.t, a: Iaction.t): Istate.t => {
-  let _ = a;
-  let _ = apply_action_exp;
-  s;
 };
