@@ -43,6 +43,20 @@ module Hexp = {
     | Mark(t, Mark.t);
 };
 
+module HZexp = {
+  [@deriving (sexp, compare)]
+  type t =
+    | Cursor(t)
+    | Var(string)
+    | NumLit(int)
+    | Plus(t, t)
+    | Lam(string, Htyp.t, t)
+    | Ap(t, t)
+    | Asc(t, Htyp.t)
+    | EHole
+    | Mark(t, Mark.t);
+};
+
 module Zexp = {
   [@deriving (sexp, compare)]
   type t =

@@ -70,9 +70,16 @@ module Iaction: {
     | WrapAp(Child.t);
 };
 
+module Update: {
+  [@deriving sexp]
+  type t =
+    | NewSyn(Iexp.upper)
+    | NewAna(Iexp.lower);
+};
+
 module UpdateQueue: {
   [@deriving sexp]
-  type t = list(Iexp.upper);
+  type t = list(Update.t);
 };
 
 module Istate: {
@@ -83,4 +90,5 @@ module Istate: {
 let initial_root: Iexp.parent;
 let initial_state: Istate.t;
 let hexp_of_iexp: Iexp.upper => Hexp.t;
+let hzexp_of_iexp: (Iexp.upper, Iexp.upper) => HZexp.t;
 let apply_action: (Istate.t, Iaction.t) => Istate.t;

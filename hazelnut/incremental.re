@@ -68,9 +68,16 @@ module Iexp = {
     | Lower(lower); // child location of a constuctor
 };
 
+module Update = {
+  [@deriving sexp]
+  type t =
+    | NewSyn(Iexp.upper)
+    | NewAna(Iexp.lower);
+};
+
 module UpdateQueue = {
   [@deriving sexp]
-  type t = list(Iexp.upper);
+  type t = list(Update.t);
 };
 
 module Istate = {
@@ -107,6 +114,43 @@ and hexp_of_iexp_middle: Iexp.middle => Hexp.t =
     }
 and hexp_of_iexp_lower: Iexp.lower => Hexp.t =
   lower => markif(lower.marked, Inconsistent, hexp_of_iexp(lower.child));
+
+let hz_markif = (b: bool, m: Mark.t, exp: HZexp.t): HZexp.t =>
+  if (b) {
+    Mark(exp, m);
+  } else {
+    exp;
+  };
+
+let rec hzexp_of_iexp = (e: Iexp.upper, cursor: Iexp.upper): HZexp.t =>
+  if (e === cursor) {
+    Cursor(hzexp_of_iexp_middle(e.middle, cursor));
+  } else {
+    hzexp_of_iexp_middle(e.middle, cursor);
+  }
+
+and hzexp_of_iexp_middle = (e: Iexp.middle, cursor: Iexp.upper): HZexp.t => {
+  switch (e) {
+  | Var(x, m) => hz_markif(m, Free, Var(x))
+  | NumLit(x) => NumLit(x)
+  | Plus(e1, e2) =>
+    Plus(hzexp_of_iexp_lower(e1, cursor), hzexp_of_iexp_lower(e2, cursor))
+  | Lam(x, t, m, e) =>
+    hz_markif(m, LamAscIncon, Lam(x, t, hzexp_of_iexp_lower(e, cursor)))
+  | Ap(e1, m, e2) =>
+    hz_markif(
+      m,
+      NonArrowAp,
+      Ap(hzexp_of_iexp_lower(e1, cursor), hzexp_of_iexp_lower(e2, cursor)),
+    )
+  | Asc(e, t) => Asc(hzexp_of_iexp_lower(e, cursor), t)
+  | EHole => EHole
+  };
+}
+
+and hzexp_of_iexp_lower = (e: Iexp.lower, cursor: Iexp.upper): HZexp.t => {
+  hz_markif(e.marked, Inconsistent, hzexp_of_iexp(e.child, cursor));
+};
 
 let _print_iexp_upper: Iexp.upper => unit =
   upper =>
@@ -245,7 +289,7 @@ let apply_action = ((e, q): Istate.t, a: Iaction.t): Istate.t => {
     set_child_in_parent(e.parent, e');
     // freshen_ana_in_parent(e.parent);
     e.parent = Deleted;
-    (e', q);
+    (e', [NewSyn(e'), ...q]);
   | InsertNumLit(x) =>
     // Numlits have no lower Iexp, so we can just create a new upper for it to link to the NumLit middle
     switch (e.middle) {
