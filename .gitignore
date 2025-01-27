@@ -1,1 +1,6 @@
 _build
+.direnv/
+flake.lock
+flake.nix
+.envrc
+.vscode/
