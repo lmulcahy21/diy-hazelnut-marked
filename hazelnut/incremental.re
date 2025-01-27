@@ -68,6 +68,16 @@ module Iexp = {
     | Lower(lower); // child location of a constuctor
 };
 
+module UpdateQueue = {
+  [@deriving sexp]
+  type t = list(Iexp.upper);
+};
+
+module Istate = {
+  [@deriving sexp]
+  type t = (Iexp.upper, UpdateQueue.t);
+};
+
 let markif = (b: bool, m: Mark.t, exp: Hexp.t): Hexp.t =>
   if (b) {
     Mark(exp, m);
@@ -125,11 +135,13 @@ let exp_hole_upper: Iexp.upper = {
 };
 
 let initial_cursor: Iexp.upper = exp_hole_upper;
-let initial_program: Iexp.parent = {
+let initial_root: Iexp.parent = {
   let r: Iexp.child_ref = {root_child: initial_cursor};
   initial_cursor.parent = Root(r);
   Root(r);
 };
+
+let initial_state: Istate.t = (initial_cursor, []);
 
 let dummy_upper = exp_hole_upper;
 
@@ -183,7 +195,7 @@ module Iaction = {
     | WrapAp(Child.t);
 };
 
-let apply_action = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
+let apply_action_exp = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
   let e_parent = e.parent;
   switch (a) {
   | MoveUp =>
@@ -335,4 +347,11 @@ let apply_action = (e: Iexp.upper, a: Iaction.t): Iexp.upper => {
     | Three => e
     };
   };
+};
+
+// TODO
+let apply_action = (s: Istate.t, a: Iaction.t): Istate.t => {
+  let _ = a;
+  let _ = apply_action_exp;
+  s;
 };

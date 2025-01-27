@@ -148,8 +148,8 @@ and paren = (inner: Pexp.t, outer: Pexp.t, side: Side.t): string => {
 
 [@deriving (sexp, fields)]
 type state = {
-  p: Incremental.Iexp.parent,
-  e: Incremental.Iexp.upper,
+  root: Incremental.Iexp.parent,
+  istate: Incremental.Istate.t,
   // t: Hazelnut.Htyp.t,
   warning: option(string),
   var_input: string,
@@ -167,8 +167,8 @@ module Model = {
 
   let init = (): t =>
     set({
-      p: Incremental.initial_program,
-      e: Incremental.initial_cursor,
+      root: Incremental.initial_root,
+      istate: Incremental.initial_state,
       // t: Hole,
       warning: None,
       var_input: "",
@@ -215,7 +215,7 @@ let apply_action =
         warning: Some(warning),
       });
     assert(
-      switch (state.p) {
+      switch (state.root) {
       | Root(_) => true
       | _ => false
       },
@@ -223,10 +223,10 @@ let apply_action =
     switch (action) {
     | HazelnutAction(action) =>
       try({
-        let new_state_expr = Incremental.apply_action(state.e, action);
+        let new_state_expr = Incremental.apply_action(state.istate, action);
         Model.set({
           ...state,
-          e: new_state_expr,
+          istate: new_state_expr,
         });
       }) {
       | Hazelnut.Unimplemented => warn("Unimplemented")
@@ -286,7 +286,7 @@ let view =
 
     // let e_folded = Hazelnut.fold_zexp_mexp(e_cursor, e_marked);
     let root_hexp =
-      switch (state.p) {
+      switch (state.root) {
       | Root(r) => Incremental.hexp_of_iexp(r.root_child)
       | _ => failwith("impossible")
       };

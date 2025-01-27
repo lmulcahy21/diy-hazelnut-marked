@@ -70,7 +70,17 @@ module Iaction: {
     | WrapAp(Child.t);
 };
 
-let initial_cursor: Iexp.upper;
-let initial_program: Iexp.parent;
+module UpdateQueue: {
+  [@deriving sexp]
+  type t = list(Iexp.upper);
+};
+
+module Istate: {
+  [@deriving sexp]
+  type t = (Iexp.upper, UpdateQueue.t);
+};
+
+let initial_root: Iexp.parent;
+let initial_state: Istate.t;
 let hexp_of_iexp: Iexp.upper => Hexp.t;
-let apply_action: (Iexp.upper, Iaction.t) => Iexp.upper;
+let apply_action: (Istate.t, Iaction.t) => Istate.t;
