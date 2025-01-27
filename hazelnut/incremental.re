@@ -172,13 +172,14 @@ let _print_iexp_upper: Iexp.upper => unit =
 //     middle: Num,
 //   };
 
-let exp_hole_upper: Iexp.upper = {
-  parent: Deleted,
-  syn: Some(Hole),
-  middle: EHole,
-};
+let exp_hole_upper: unit => Iexp.upper =
+  () => {
+    parent: Deleted,
+    syn: Some(Hole),
+    middle: EHole,
+  };
 
-let initial_cursor: Iexp.upper = exp_hole_upper;
+let initial_cursor: Iexp.upper = exp_hole_upper();
 let initial_root: Iexp.parent = {
   let r: Iexp.child_ref = {root_child: initial_cursor};
   initial_cursor.parent = Root(r);
@@ -187,7 +188,7 @@ let initial_root: Iexp.parent = {
 
 let initial_state: Istate.t = (initial_cursor, []);
 
-let dummy_upper = exp_hole_upper;
+let dummy_upper = exp_hole_upper();
 
 // let freshen_typ = (t: option(Ityp.upper)): unit => {
 //   switch (t) {
@@ -345,8 +346,8 @@ let apply_action = ((e, q): Istate.t, a: Iaction.t): Istate.t => {
       new_upper;
     };
     switch (child) {
-    | One => (make_plus_with_children(e, exp_hole_upper), q)
-    | Two => (make_plus_with_children(exp_hole_upper, e), q)
+    | One => (make_plus_with_children(e, exp_hole_upper()), q)
+    | Two => (make_plus_with_children(exp_hole_upper(), e), q)
     | Three => (e, q)
     };
 
@@ -385,10 +386,10 @@ let apply_action = ((e, q): Istate.t, a: Iaction.t): Istate.t => {
     switch (child) {
     | One =>
       // freshen_typ(e.syn); // TODO this will need to return a worker list
-      (make_ap_with_children(e, exp_hole_upper), q)
+      (make_ap_with_children(e, exp_hole_upper()), q)
     | Two =>
       // freshen_typ(e.syn); // TODO this will need to return a worker list
-      (make_ap_with_children(exp_hole_upper, e), q)
+      (make_ap_with_children(exp_hole_upper(), e), q)
     | Three => (e, q)
     };
   };
