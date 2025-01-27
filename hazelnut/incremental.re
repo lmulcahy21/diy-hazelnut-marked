@@ -115,41 +115,59 @@ and hexp_of_iexp_middle: Iexp.middle => Hexp.t =
 and hexp_of_iexp_lower: Iexp.lower => Hexp.t =
   lower => markif(lower.marked, Inconsistent, hexp_of_iexp(lower.child));
 
-let hz_markif = (b: bool, m: Mark.t, exp: HZexp.t): HZexp.t =>
+let display_markif = (b: bool, m: Mark.t, exp: DisplayExp.t): DisplayExp.t =>
   if (b) {
     Mark(exp, m);
   } else {
     exp;
   };
 
-let rec hzexp_of_iexp = (e: Iexp.upper, cursor: Iexp.upper): HZexp.t =>
+let rec display_of_iexp =
+        (e: Iexp.upper, cursor: Iexp.upper, updates: UpdateQueue.t)
+        : DisplayExp.t =>
   if (e === cursor) {
-    Cursor(hzexp_of_iexp_middle(e.middle, cursor));
+    Cursor(display_of_iexp_middle(e.middle, cursor, updates));
   } else {
-    hzexp_of_iexp_middle(e.middle, cursor);
+    display_of_iexp_middle(e.middle, cursor, updates);
   }
 
-and hzexp_of_iexp_middle = (e: Iexp.middle, cursor: Iexp.upper): HZexp.t => {
+and display_of_iexp_middle =
+    (e: Iexp.middle, cursor: Iexp.upper, updates: UpdateQueue.t): DisplayExp.t => {
   switch (e) {
-  | Var(x, m) => hz_markif(m, Free, Var(x))
+  | Var(x, m) => display_markif(m, Free, Var(x))
   | NumLit(x) => NumLit(x)
   | Plus(e1, e2) =>
-    Plus(hzexp_of_iexp_lower(e1, cursor), hzexp_of_iexp_lower(e2, cursor))
+    Plus(
+      display_of_iexp_lower(e1, cursor, updates),
+      display_of_iexp_lower(e2, cursor, updates),
+    )
   | Lam(x, t, m, e) =>
-    hz_markif(m, LamAscIncon, Lam(x, t, hzexp_of_iexp_lower(e, cursor)))
+    display_markif(
+      m,
+      LamAscIncon,
+      Lam(x, t, display_of_iexp_lower(e, cursor, updates)),
+    )
   | Ap(e1, m, e2) =>
-    hz_markif(
+    display_markif(
       m,
       NonArrowAp,
-      Ap(hzexp_of_iexp_lower(e1, cursor), hzexp_of_iexp_lower(e2, cursor)),
+      Ap(
+        display_of_iexp_lower(e1, cursor, updates),
+        display_of_iexp_lower(e2, cursor, updates),
+      ),
     )
-  | Asc(e, t) => Asc(hzexp_of_iexp_lower(e, cursor), t)
+  | Asc(e, t) => Asc(display_of_iexp_lower(e, cursor, updates), t)
   | EHole => EHole
   };
 }
 
-and hzexp_of_iexp_lower = (e: Iexp.lower, cursor: Iexp.upper): HZexp.t => {
-  hz_markif(e.marked, Inconsistent, hzexp_of_iexp(e.child, cursor));
+and display_of_iexp_lower =
+    (e: Iexp.lower, cursor: Iexp.upper, updates: UpdateQueue.t): DisplayExp.t => {
+  display_markif(
+    e.marked,
+    Inconsistent,
+    display_of_iexp(e.child, cursor, updates),
+  );
 };
 
 let _print_iexp_upper: Iexp.upper => unit =

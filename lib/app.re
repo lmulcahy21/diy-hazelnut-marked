@@ -8,6 +8,8 @@ module Pexp = {
   [@deriving (sexp, compare)]
   type t =
     | Cursor(t)
+    | NewSyn(t, t)
+    | NewAna(t, t)
     | Arrow(t, t)
     | Num
     | Var(string)
@@ -45,17 +47,19 @@ let rec pexp_of_htyp: Hazelnut.Htyp.t => Pexp.t =
 //   | EHole => EHole
 //   | Mark(e, m) => MarkHole(pexp_of_hexp(e), string_of_mark(m));
 
-let rec pexp_of_hzexp: Hazelnut.HZexp.t => Pexp.t =
+let rec pexp_of_display_exp: Hazelnut.DisplayExp.t => Pexp.t =
   fun
-  | Cursor(e) => Cursor(pexp_of_hzexp(e))
+  | Cursor(e) => Cursor(pexp_of_display_exp(e))
+  | NewSyn(e, t) => NewSyn(pexp_of_display_exp(e), pexp_of_htyp(t))
+  | NewAna(e, t) => NewAna(pexp_of_display_exp(e), pexp_of_htyp(t))
   | Var(x) => Var(x)
-  | Lam(x, a, e) => Lam(x, pexp_of_htyp(a), pexp_of_hzexp(e))
-  | Ap(e1, e2) => Ap(pexp_of_hzexp(e1), pexp_of_hzexp(e2))
+  | Lam(x, a, e) => Lam(x, pexp_of_htyp(a), pexp_of_display_exp(e))
+  | Ap(e1, e2) => Ap(pexp_of_display_exp(e1), pexp_of_display_exp(e2))
   | NumLit(n) => NumLit(n)
-  | Plus(e1, e2) => Plus(pexp_of_hzexp(e1), pexp_of_hzexp(e2))
-  | Asc(e, t) => Asc(pexp_of_hzexp(e), pexp_of_htyp(t))
+  | Plus(e1, e2) => Plus(pexp_of_display_exp(e1), pexp_of_display_exp(e2))
+  | Asc(e, t) => Asc(pexp_of_display_exp(e), pexp_of_htyp(t))
   | EHole => EHole
-  | Mark(e, m) => MarkHole(pexp_of_hzexp(e), string_of_mark(m));
+  | Mark(e, m) => MarkHole(pexp_of_display_exp(e), string_of_mark(m));
 
 // let rec pexp_of_ztyp: Hazelnut.Ztyp.t => Pexp.t =
 //   fun
@@ -80,6 +84,8 @@ let rec pexp_of_hzexp: Hazelnut.HZexp.t => Pexp.t =
 let rec prec: Pexp.t => int =
   fun
   | Cursor(e) => prec(e)
+  | NewSyn(_, _) => 5
+  | NewAna(_, _) => 5
   | Arrow(_) => 1
   | Num => 0
   | Var(_) => 0
@@ -101,6 +107,8 @@ module Side = {
 let rec assoc: Pexp.t => Side.t =
   fun
   | Cursor(e) => assoc(e)
+  | NewSyn(_, _) => Left
+  | NewAna(_, _) => Left
   | Arrow(_) => Right
   | Num => Atom
   | Var(_) => Atom
@@ -115,6 +123,10 @@ let rec assoc: Pexp.t => Side.t =
 let rec string_of_pexp: Pexp.t => string =
   fun
   | Cursor(e) => "👉" ++ string_of_pexp(e) ++ "👈"
+  | NewSyn(e, t) as outer =>
+    paren(e, outer, Side.Left) ++ "=> " ++ paren(t, outer, Side.Right) ++ "*"
+  | NewAna(e, t) as outer =>
+    paren(e, outer, Side.Left) ++ "<= " ++ paren(t, outer, Side.Right) ++ "*"
   | Arrow(t1, t2) as outer =>
     paren(t1, outer, Side.Left) ++ " -> " ++ paren(t2, outer, Side.Right)
   | Num => "Num"
@@ -297,13 +309,14 @@ let view =
     //   Hazelnut.mark_syn(Hazelnut.TypCtx.empty, e_no_cursor);
 
     // let e_folded = Hazelnut.fold_zexp_mexp(e_cursor, e_marked);
-    let root_hzexp =
+    let root_display_exp =
       switch (state.root) {
-      | Root(r) => Incremental.hzexp_of_iexp(r.root_child, fst(state.istate))
+      | Root(r) =>
+        Incremental.display_of_iexp(r.root_child, fst(state.istate))
       | _ => failwith("impossible")
       };
 
-    let root_string = string_of_pexp(pexp_of_hzexp(root_hzexp));
+    let root_string = string_of_pexp(pexp_of_display_exp(root_display_exp));
 
     let expression =
       Node.div([
